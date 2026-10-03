@@ -545,6 +545,7 @@ fn input_origin(frame: &hypercmd::layout::Presentation, input: &Node) -> (u16, u
 fn controls_contract() {
     let mut harness = mount_controls();
     activation_and_vertical_focus(&mut harness);
+    pointer_activates_button_content(&mut harness);
     placeholder_and_cluster_edits(&mut harness);
     selection_and_paste_limits(&mut harness);
     tab_and_label_focus(&mut harness);
@@ -580,6 +581,27 @@ fn activation_and_vertical_focus(harness: &mut ControlsHarness) {
     assert_eq!(controls.focus(), root.find("draft"));
     key(controls, Key::Up, false);
     assert_eq!(controls.focus(), root.find("activate"));
+}
+
+fn pointer_activates_button_content(harness: &mut ControlsHarness) {
+    let (root, controls) = (&harness.root, &mut harness.controls);
+    for (id, clicks) in [("activate-label", 2), ("activate", 3), ("disabled-label", 3)] {
+        let presentation = frame(root, controls, (80, 40));
+        let node = root.find(id).unwrap();
+        let entry = presentation
+            .entries
+            .iter()
+            .find(|entry| entry.node == node)
+            .unwrap();
+        let click = Input::Click {
+            column: entry.rect.x,
+            row: entry.rect.y,
+        };
+        controls.presented(presentation).unwrap();
+        controls.handle(click).unwrap();
+        assert_eq!(harness.clicks.get(), clicks, "clicking {id}");
+        assert_eq!(controls.focus(), root.find("activate"));
+    }
 }
 
 fn placeholder_and_cluster_edits(harness: &mut ControlsHarness) {

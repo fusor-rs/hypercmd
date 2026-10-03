@@ -463,8 +463,10 @@ mod unix {
         let (color, rgb) = color_capabilities();
         for cell in &mut presentation.buffer.content {
             for color_value in [&mut cell.fg, &mut cell.bg] {
-                if !color || (!rgb && matches!(color_value, Color::Rgb(..))) {
+                if !color {
                     *color_value = Color::Reset;
+                } else if !rgb {
+                    *color_value = indexed_color(*color_value);
                 }
             }
         }
@@ -544,6 +546,45 @@ mod unix {
         let indexed = std::env::var("TERM").is_ok_and(|term| term.contains("256color"));
         let enabled = std::env::var_os("NO_COLOR").is_none();
         (enabled && (rgb || indexed), enabled && rgb)
+    }
+
+    fn indexed_color(color: Color) -> Color {
+        const CUBE_LEVELS: [u8; 6] = [0, 95, 135, 175, 215, 255];
+        const CUBE_START: usize = 16;
+        const GRAY_START: u8 = 232;
+        const GRAY_FIRST: u16 = 8;
+        const GRAY_STEP: u16 = 10;
+        const GRAY_COUNT: u16 = 24;
+        let Color::Rgb(red, green, blue) = color else {
+            return color;
+        };
+        let channels = [red, green, blue];
+        let cube = channels.map(|channel| {
+            CUBE_LEVELS
+                .iter()
+                .enumerate()
+                .min_by_key(|(_, level)| channel.abs_diff(**level))
+                .expect("the color cube has six levels")
+        });
+        let distance = |candidate: [u8; 3]| {
+            channels
+                .into_iter()
+                .zip(candidate)
+                .map(|(channel, other)| u32::from(channel.abs_diff(other)).pow(2))
+                .sum::<u32>()
+        };
+        let average = channels.into_iter().map(u16::from).sum::<u16>() / channels.len() as u16;
+        let gray_index =
+            ((average.saturating_sub(GRAY_FIRST) + GRAY_STEP / 2) / GRAY_STEP).min(GRAY_COUNT - 1);
+        let gray_level = (GRAY_FIRST + gray_index * GRAY_STEP) as u8;
+        if distance([gray_level; 3]) < distance(cube.map(|(_, level)| *level)) {
+            Color::Indexed(GRAY_START + gray_index as u8)
+        } else {
+            let cube_index = cube.into_iter().fold(0, |index, (coordinate, _)| {
+                index * CUBE_LEVELS.len() + coordinate
+            });
+            Color::Indexed((CUBE_START + cube_index) as u8)
+        }
     }
 
     #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]

@@ -117,7 +117,9 @@ processing is capped at 256 levels. Zero-sized viewports produce empty buffers.
 resize/removal and lets keyboard focus reveal a control. Painting clips against
 the viewport and every clipping ancestor. Hit testing uses the last presented
 layout. Full dirty frames use Ratatui's buffer diff; settled state submits no
-new frames. Buttons and single-line inputs use reverse video for focus.
+new frames. Buttons and single-line inputs use reverse video for focus unless a
+matching authored `:focus` rule supplies their appearance, including application
+overrides. This keeps borders and inherited colors under the stylesheet's control.
 Textareas show an underlined caret; focusable containers use authored `:focus`
 styles, such as changing a rounded border to a solid border.
 Controls entirely behind hidden overflow or the root viewport are excluded from

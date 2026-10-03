@@ -33,6 +33,16 @@ fn pty_child() {
     if mode == "limit" {
         options.max_paste_bytes = 8;
     }
+    if mode == "colors" {
+        use crate::style::{Declaration, Rule, Selector};
+        options.layout.overrides = &[Rule {
+            selector: &[Selector::Tag("main")],
+            declarations: &[
+                Declaration::Foreground(Color::Rgb(223, 80, 54)),
+                Declaration::Background(Color::Rgb(39, 42, 44)),
+            ],
+        }];
+    }
     let outcome = panic::catch_unwind(AssertUnwindSafe(|| super::super::run_with(scope, &options)));
     match (mode.as_str(), outcome) {
         ("panic", Err(_)) => println!("PANIC_RESTORED"),
@@ -171,6 +181,7 @@ fn spawn_background(scope: &Scope, mode: &str, value: &Signal<String>) {
 // ordering. This one child protocol covers the required restoration paths.
 #[test]
 fn terminal_pty() {
+    terminal_colors();
     for mode in [
         "normal",
         "error",
@@ -403,4 +414,38 @@ exit 1
     command.env("PATH", &directory);
     command.env("HYPERCMD_LINK_LOG", directory.join("opened"));
     directory
+}
+
+fn terminal_colors() {
+    for (colorterm, no_color, expected) in [
+        (
+            "truecolor",
+            None,
+            &["\x1b[38;2;223;80;54;48;2;39;42;44m"] as &[&str],
+        ),
+        ("", None, &["\x1b[38;5;167;48;5;235m"]),
+        ("truecolor", Some("1"), &[]),
+    ] {
+        let mut command = CommandBuilder::new(std::env::current_exe().unwrap());
+        command.args(["--ignored", "--exact", CHILD, "--nocapture"]);
+        command.env("HYPERCMD_PTY_CASE", "colors");
+        command.env("COLORTERM", colorterm);
+        command.env_remove("NO_COLOR");
+        if let Some(value) = no_color {
+            command.env("NO_COLOR", value);
+        }
+        let mut terminal = Terminal::spawn(command, 12, 60);
+        terminal.wait_for(0, "PTY_READY");
+        terminal.send(&[3]);
+        terminal.wait_exit();
+        terminal.assert_restored(true);
+        let output = String::from_utf8_lossy(&terminal.transcript);
+        for escape in expected {
+            assert!(output.contains(escape), "missing {escape:?} in {output:?}");
+        }
+        if expected.is_empty() {
+            assert!(!output.contains("\x1b[38;"));
+            assert!(!output.contains("\x1b[48;"));
+        }
+    }
 }

@@ -43,8 +43,10 @@ separate presses.
 
 The visible focus marker does not depend on color. Foreground/background colors
 are disabled for `NO_COLOR` or unknown terminal capabilities. `TERM` containing
-`256color` enables named/indexed colors; RGB requires `COLORTERM=truecolor` or
-`24bit`, otherwise RGB falls back to the terminal defaults. Font/attribute
+`256color` enables named/indexed colors. RGB uses `COLORTERM=truecolor` or
+`24bit`; in a 256-color terminal it maps to the nearest color in the
+[xterm color cube or grayscale ramp](https://github.com/ThomasDickey/xterm-snapshots/blob/master/256colres.h).
+The first 16, theme-dependent palette entries are excluded from that mapping. Font/attribute
 rendering ultimately depends on the emulator. See [the profile](profile.md) for Unicode policy.
 
 ## Terminal lifetime and scheduling

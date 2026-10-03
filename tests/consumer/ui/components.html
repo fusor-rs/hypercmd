@@ -35,13 +35,18 @@
 </template>
 <template rust:component="Controls">
   <section id="controls">
-    <button id="activate" on:click="state.clicks.update(|n| *n += 1)">Activate</button>
+    <button id="activate" on:click="state.clicks.update(|n| *n += 1)">
+      <p id="activate-label">Activate</p>
+    </button>
     <label id="draft-label" for="draft">Draft</label>
     <If condition="{{ state.visible.get() }}">
       <input id="draft" type="text" bind="state.draft" placeholder="Type a draft" on:focus="if state.remove_on_focus.get() { state.visible.set(false) }" on:blur="state.blurred.set(state.draft.touched())">
     </If>
     <input id="readonly" type="text" value="Read only" readonly>
-    <button id="disabled" disabled="{{ state.disabled.get() }}">Disabled</button>
+    <button id="disabled" disabled="{{ state.disabled.get() }}"
+            on:click="state.clicks.update(|n| *n += 1)">
+      <p id="disabled-label">Disabled</p>
+    </button>
     <input id="hidden" type="text" class="hidden">
     <label id="nested-label">Nested<input id="explicit" type="text" tabindex="-1"></label>
     <p id="duplicate">Committed</p>

@@ -79,6 +79,7 @@ fn multiline_editor_and_scrollable_workspace_preserve_input_and_focus() {
     workspace_geometry(&scope, &mut controls, &size);
     pointer_scroll(&scope, &mut controls);
     single_line_draft(&scope, &mut controls);
+    authored_focus_replaces_reverse_video(&scope, &mut controls);
     link_destinations(&scope, &mut controls, &draft);
     assert_eq!(hypercmd::text::ellipsize("東京👩‍💻abcdef", 7), "東京👩‍💻…");
     assert_eq!(scope.take_errors().len(), 0);
@@ -227,5 +228,47 @@ fn link_destinations(scope: &Scope, controls: &mut Controller, draft: &Signal<St
             scope.root().find("link-label").unwrap().text(),
             "https://example…"
         );
+    }
+}
+
+fn authored_focus_replaces_reverse_video(scope: &Scope, controls: &mut Controller) {
+    use hypercmd::style::{Color, Declaration, Rule, Selector, StyleSheet};
+    const OVERRIDE: StyleSheet = &[Rule {
+        selector: &[Selector::Tag("button"), Selector::Focus],
+        declarations: &[Declaration::Foreground(Color::Red)],
+    }];
+    let root = scope.root();
+    let button = root
+        .descendants()
+        .find(|node| node.tag() == "button")
+        .unwrap();
+    for (node, overrides, expected) in [
+        (
+            root.find("single").unwrap(),
+            &[] as StyleSheet,
+            "UNDERLINED",
+        ),
+        (button.clone(), &[], "BOLD | REVERSED"),
+        (button, OVERRIDE, "BOLD"),
+    ] {
+        controls.set_focus(&node).unwrap();
+        let frame = hypercmd::layout::render(
+            &root,
+            (40, 16),
+            Some(&node),
+            controls.scrolls_mut(),
+            &hypercmd::layout::LayoutOptions {
+                overrides,
+                ..Default::default()
+            },
+        )
+        .unwrap();
+        let entry = frame
+            .entries
+            .iter()
+            .find(|entry| entry.node == node)
+            .unwrap();
+        let cell = &frame.buffer[(entry.content.x, entry.content.y)];
+        assert_eq!(format!("{:?}", cell.modifier), expected);
     }
 }

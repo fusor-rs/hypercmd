@@ -165,11 +165,11 @@ impl Computed {
             }
             _ => {}
         }
-        value.cascade(node.0.styles, node, focus);
-        value.cascade(overrides, node, focus);
         if focus == Some(node) && matches!(node.tag(), "button" | "input") {
             value.visual = value.visual.add_modifier(Modifier::REVERSED);
         }
+        value.cascade(node.0.styles, node, focus);
+        value.cascade(overrides, node, focus);
         value
     }
 
@@ -181,6 +181,13 @@ impl Computed {
             .collect();
         matching.sort_by_key(|(index, rule)| (rule.specificity(), *index));
         for (_, rule) in matching {
+            if rule
+                .selector
+                .iter()
+                .any(|selector| matches!(selector, Selector::Focus))
+            {
+                self.visual = self.visual.remove_modifier(Modifier::REVERSED);
+            }
             for declaration in rule.declarations {
                 self.apply(*declaration);
             }

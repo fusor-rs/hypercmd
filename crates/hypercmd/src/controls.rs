@@ -544,13 +544,14 @@ impl Controller {
                     .find(|node| self.focusable(node))
                     .cloned()
             });
-            if let Some(target) = target {
-                self.set_focus(&target)?;
-            }
-            if self.focus.as_ref() != Some(&node) || !self.focusable(&node) {
+            let Some(target) = target else {
+                return Ok(());
+            };
+            self.set_focus(&target)?;
+            if self.focus.as_ref() != Some(&target) || !self.focusable(&target) {
                 return Ok(());
             }
-            activate(&node)?;
+            activate(&target)?;
         }
         Ok(())
     }
