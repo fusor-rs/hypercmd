@@ -1,0 +1,11 @@
+main { height: 100%; padding: 1ch; gap: 1ch; }
+.path { white-space: pre-wrap; max-height: 3ch; overflow: hidden; }
+.screen, .listing, .entries { flex-grow: 1; flex-shrink: 1; min-height: 0; }
+.screen, .listing { gap: 1ch; }
+.toolbar { flex-direction: row; gap: 1ch; }
+.filter { width: 32ch; flex-shrink: 1; min-width: 8ch; gap: 1ch; }
+.entries { overflow: auto; }
+.entry { font-weight: normal; white-space: pre; overflow: hidden; }
+.preview { overflow: auto; }
+pre { white-space: pre-wrap; }
+input { flex-grow: 1; flex-shrink: 1; min-width: 1ch; }

@@ -1,0 +1,11 @@
+<App state="{{ Counter::new() }}">
+  <main>
+    <h1>Counter</h1>
+    <p>Count: {{ state.count.get() }}</p>
+    <div class="actions">
+      <button on:click="state.increment()">Increment</button>
+      <button on:click="state.count.set(0)">Reset</button>
+    </div>
+    <p>Tab moves focus · Enter presses · Ctrl+C quits</p>
+  </main>
+</App>

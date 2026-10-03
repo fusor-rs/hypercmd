@@ -1,0 +1,16 @@
+<template rust:component="JobDetails">
+  <section>
+    <h2>{{ format!("Job {} details", state.id) }}</h2>
+    <p>{{ format!("Live progress: {}%", state.progress()) }}</p>
+    <div class="toolbar">
+      <button on:click="state.history.back()">Back to jobs</button>
+      <button on:click="state.reload(false)">Reload report</button>
+      <button on:click="state.reload(true)">Simulate failed read</button>
+      <button on:click="state.boundary.retry()">Retry</button>
+    </div>
+    <p>{{ state.status() }}</p>
+    <Async boundary="{{ state.boundary }}">
+      <Await value="{{ state.report }}" let="report"><p>{{ report.as_str() }}</p></Await>
+    </Async>
+  </section>
+</template>

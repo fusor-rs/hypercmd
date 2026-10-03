@@ -1,0 +1,28 @@
+name: Check
+on: [push, pull_request]
+jobs:
+  check:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { os: ubuntu-24.04, recipe: check }
+          - { os: macos-15, recipe: check }
+          - { os: ubuntu-24.04, recipe: browser }
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@1.85
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - uses: taiki-e/install-action@just
+      - run: just fetch
+      - if: matrix.recipe == 'browser'
+        run: just setup-browser
+      - if: matrix.recipe == 'browser'
+        run: npx playwright install-deps chromium
+      - run: just ${{ matrix.recipe }}

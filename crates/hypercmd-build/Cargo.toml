@@ -1,0 +1,25 @@
+[package]
+name = "hypercmd-build"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Compile fusor HTML components for Hypercmd terminals"
+readme = "../../README.md"
+keywords = ["fusor", "terminal", "tui", "html", "code-generation"]
+categories = ["development-tools::build-utils"]
+
+[dependencies]
+fusor-build.workspace = true
+proc-macro2.workspace = true
+quote.workspace = true
+syn.workspace = true
+serde.workspace = true
+toml.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true
+
+[lints]
+workspace = true

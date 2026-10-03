@@ -1,0 +1,34 @@
+[package]
+name = "hypercmd-job-controls"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish = false
+description = "Job controls shared unchanged by Hypercmd and fusor browser applications"
+readme = "README.md"
+include = ["src/**", "ui/**", "build.rs", "README.md", "Cargo.toml"]
+
+[features]
+terminal = ["dep:hypercmd", "dep:hypercmd-build"]
+browser = ["fusor/dom", "fusor-components/browser", "dep:fusor-build"]
+
+[dependencies]
+fusor = { workspace = true, features = ["derive"] }
+fusor-components.workspace = true
+hypercmd = { workspace = true, optional = true }
+
+[build-dependencies]
+hypercmd-build = { workspace = true, optional = true }
+fusor-build = { workspace = true, optional = true }
+
+[package.metadata.hypercmd]
+templates = ["ui"]
+styles = ["ui/terminal.css"]
+
+[package.metadata.fusor]
+entry = "ui/job.html"
+templates = []
+
+[lints]
+workspace = true

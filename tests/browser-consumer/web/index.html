@@ -1,0 +1,26 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Shared Hypercmd job controls</title><link rel="icon" href="data:,">
+  <style>
+    body { margin: 2rem auto; padding: 0 1rem; max-width: 48rem; font: 17px/1.5 system-ui, sans-serif; }
+    .jobs { display: grid; gap: 1rem; }
+  </style>
+</head>
+<body>
+  <App state="{{ App::new()? }}">
+    <main>
+      <h1>Shared job controls</h1>
+      <p>The Rust state and HTML below also run in the terminal job inspector.</p>
+      <p id="notice">{{ state.notice.get() }}</p>
+      <button id="reverse" on:click="state.jobs.update(|jobs| jobs.reverse())">Reverse</button>
+      <div class="jobs">
+        <ForEach items="{{ state.jobs.get() }}" key="{{ |job| job.id }}">
+          <JobRow job="{{ item.clone() }}" jobs="{{ state.jobs.clone() }}" inspect="{{ state.inspect.clone() }}"></JobRow>
+        </ForEach>
+      </div>
+    </main>
+  </App>
+</body>
+</html>

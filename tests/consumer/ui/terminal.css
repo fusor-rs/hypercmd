@@ -1,0 +1,4 @@
+.hidden { display: none; }
+input { width: 12ch; }
+input:focus { text-decoration: underline; }
+#controls { height: 100%; overflow: auto; }

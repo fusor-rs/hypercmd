@@ -1,0 +1,30 @@
+[package]
+name = "hypercmd-consumer"
+edition = "2024"
+rust-version = "1.85"
+publish = false
+
+[workspace]
+
+[package.metadata.hypercmd]
+entry = "ui/app.html"
+templates = ["ui"]
+styles = ["ui/terminal.css"]
+
+[dependencies]
+hypercmd = { path = "../../crates/hypercmd", default-features = false }
+fusor = { package = "fusor-core", version = "=0.1.4", default-features = false, features = ["derive"] }
+fusor-components = { version = "=0.1.4", default-features = false }
+fusor-router = { version = "=0.1.4", default-features = false }
+fusor-async = { version = "=0.1.4", default-features = false }
+
+fusor-std = { version = "=0.1.4", default-features = false, features = ["forms"] }
+
+[dev-dependencies]
+fusor-test = { version = "=0.1.4", default-features = false }
+
+[build-dependencies]
+hypercmd-build = { path = "../../crates/hypercmd-build" }
+
+[lints.rust]
+unsafe_code = "forbid"

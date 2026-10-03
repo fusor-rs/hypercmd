@@ -1,0 +1,27 @@
+[package]
+name = "hypercmd-cli"
+description = "The hypercmd command-line tool: create, check, run and build terminal apps"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+readme = "../../README.md"
+keywords = ["fusor", "terminal", "tui", "cli", "html"]
+categories = ["command-line-utilities", "development-tools"]
+
+[[bin]]
+name = "hypercmd"
+path = "src/main.rs"
+doc = false
+
+[dependencies]
+hypercmd-build.workspace = true
+fusor-build.workspace = true
+clap = { version = "=4.5.53", features = ["derive"] }
+serde.workspace = true
+serde_json.workspace = true
+toml.workspace = true
+
+[lints]
+workspace = true

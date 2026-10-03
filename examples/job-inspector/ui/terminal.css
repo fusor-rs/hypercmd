@@ -1,0 +1,5 @@
+main { height: 100%; padding: 1ch; gap: 1ch; }
+.toolbar { flex-direction: row; gap: 1ch; }
+.list-screen { flex-grow: 1; flex-shrink: 1; min-height: 0; gap: 1ch; }
+.jobs { flex-grow: 1; flex-shrink: 1; min-height: 0; overflow: auto; gap: 1ch; }
+input { width: 18ch; }

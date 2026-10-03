@@ -1,0 +1,35 @@
+[workspace]
+members = ["crates/hypercmd", "crates/hypercmd-build", "crates/hypercmd-cli", "examples/file-browser", "examples/job-inspector", "examples/job-controls"]
+exclude = ["tests/consumer", "tests/browser-consumer"]
+resolver = "2"
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.85"
+license = "MIT"
+repository = "https://github.com/fusor-rs/hypercmd"
+
+[workspace.lints.rust]
+unsafe_code = "forbid"
+
+[workspace.dependencies]
+hypercmd = { path = "crates/hypercmd", version = "=0.1.0", default-features = false }
+hypercmd-build = { path = "crates/hypercmd-build", version = "=0.1.0" }
+hypercmd-job-controls = { path = "examples/job-controls", version = "=0.1.0" }
+portable-pty = "=0.9.0"
+rustix = "=1.1.4"
+tempfile = "=3.23.0"
+fusor = { package = "fusor-core", version = "=0.1.4", default-features = false }
+fusor-build = { version = "=0.1.4" }
+fusor-components = { version = "=0.1.4", default-features = false }
+fusor-router = { version = "=0.1.4", default-features = false }
+fusor-async = { version = "=0.1.4", default-features = false }
+fusor-test = { version = "=0.1.4", default-features = false }
+fusor-std = { version = "=0.1.4", default-features = false }
+proc-macro2 = "1.0.103"
+quote = "1.0.42"
+syn = { version = "2.0.111", features = ["full"] }
+serde = { version = "1.0.228", features = ["derive"] }
+serde_json = "1.0.145"
+toml = "0.8.23"

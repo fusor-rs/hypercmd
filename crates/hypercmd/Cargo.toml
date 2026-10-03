@@ -1,0 +1,40 @@
+[package]
+name = "hypercmd"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Retained terminal interfaces authored in HTML and Rust"
+readme = "../../README.md"
+keywords = ["fusor", "terminal", "tui", "html", "reactive"]
+categories = ["command-line-interface", "gui"]
+
+[features]
+default = ["native"]
+native = ["dep:crossterm", "dep:rustix", "dep:signal-hook", "dep:mio", "ratatui/crossterm"]
+
+[dependencies]
+fusor.workspace = true
+futures-util = { version = "=0.3.34", default-features = false, features = ["std"] }
+futures-channel = { version = "=0.3.34", default-features = false, features = ["std"] }
+fusor-router.workspace = true
+fusor-async.workspace = true
+taffy = { version = "=0.7.7", default-features = false, features = ["std", "taffy_tree", "flexbox", "content_size"] }
+ratatui = { version = "=0.29.0", default-features = false }
+# Ratatui's range admits releases requiring Rust 1.88; constrain fresh consumers too.
+instability = "=0.3.10"
+unicode-segmentation = "=1.12.0"
+unicode-width = "=0.2.0"
+crossterm = { version = "=0.28.1", default-features = false, features = ["bracketed-paste", "windows"], optional = true }
+
+[target.'cfg(unix)'.dependencies]
+rustix = { workspace = true, features = ["fs", "termios"], optional = true }
+signal-hook = { version = "=0.3.18", default-features = false, optional = true }
+mio = { version = "=1.1.0", features = ["os-poll", "os-ext"], optional = true }
+
+[dev-dependencies]
+portable-pty.workspace = true
+
+[lints]
+workspace = true

@@ -1,0 +1,30 @@
+<App state="{{ Inspector::new(owner)? }}">
+  <main>
+    <h1>Hypercmd · Simulated job inspector</h1>
+    <p>Tab / Shift+Tab: focus · Enter / Space: activate · PageUp / PageDown: scroll · Ctrl+C: quit</p>
+    <If condition="{{ !state.notice.get().is_empty() }}"><p>{{ state.notice.get() }}</p></If>
+    <Router>
+      <Route path="/">
+        <section class="list-screen">
+          <section class="toolbar">
+            <label for="filter">Filter</label>
+            <input id="filter" type="text" bind="state.filter" placeholder="Job name">
+            <label for="priority">Priority</label>
+            <input id="priority" type="text" bind="state.priority">
+            <button on:click="state.jobs.update(|jobs| jobs.reverse())">Reverse</button>
+          </section>
+          <div class="jobs">
+            <ForEach items="{{ state.visible.get() }}" key="{{ |job| job.id }}">
+              <JobRow job="{{ item.clone() }}" jobs="{{ state.jobs.clone() }}" inspect="{{ state.inspect.clone() }}"></JobRow>
+            </ForEach>
+          </div>
+          <p>{{ format!("{} jobs · priority {} · invalid numeric drafts remain editable", state.visible.with(Vec::len), state.priority.get()) }}</p>
+        </section>
+      </Route>
+      <Route path="/jobs/:id" let="job">
+        <JobDetails id="{{ job.id.clone() }}" jobs="{{ state.jobs.clone() }}"></JobDetails>
+      </Route>
+      <Route fallback><p>Unknown screen</p></Route>
+    </Router>
+  </main>
+</App>

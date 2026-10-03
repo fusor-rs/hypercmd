@@ -1,0 +1,29 @@
+[package]
+name = "file-browser"
+edition.workspace = true
+rust-version.workspace = true
+publish = false
+
+[package.metadata.hypercmd]
+templates = ["ui"]
+styles = ["ui/terminal.css"]
+
+[dependencies]
+hypercmd = { workspace = true, features = ["native"] }
+fusor.workspace = true
+fusor-components.workspace = true
+fusor-async.workspace = true
+fusor-router.workspace = true
+
+[target.'cfg(unix)'.dependencies]
+rustix = { workspace = true, features = ["fs"] }
+
+[dev-dependencies]
+tempfile.workspace = true
+portable-pty.workspace = true
+
+[build-dependencies]
+hypercmd-build.workspace = true
+
+[lints]
+workspace = true

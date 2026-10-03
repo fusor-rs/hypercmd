@@ -1,0 +1,6 @@
+<App state="{{ AppState::new(owner) }}">
+  <main>
+    <p id="constructed">{{ state.message.get() }}</p>
+    <button id="app-increment" on:click="state.count.update(|n| *n += 1)">Count {{ state.count.get() }}</button>
+  </main>
+</App>

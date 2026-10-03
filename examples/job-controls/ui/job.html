@@ -1,0 +1,10 @@
+<template rust:component="JobRow">
+  <section class="job">
+    <p><strong>{{ state.job.get().name }}</strong> {{ format!("{}%", state.job.get().progress) }}</p>
+    <div class="job-actions">
+      <button on:click="state.inspect()">{{ format!("Inspect ({})", state.inspections.get()) }}</button>
+      <button disabled="{{ state.job.get().cancelled }}" on:click="state.cancel()">Cancel work</button>
+      <button on:click="state.remove()">Remove</button>
+    </div>
+  </section>
+</template>

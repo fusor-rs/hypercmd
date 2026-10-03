@@ -1,0 +1,50 @@
+<template rust:component="Panel">
+  <section>
+    <h1>{{ state.title }}</h1>
+    <button id="increment" on:click="state.count.update(|n| *n += 1)">{{ state.count.get() }}</button>
+    <input id="number" type="text" bind="state.number" on:input="state.record_input()">
+    <input id="member" type="checkbox" value="batch" bind="state.selection">
+    <Frame><span id="projected">{{ state.title }}</span></Frame>
+    <If condition="{{ state.visible.get() }}">
+      <div>
+        <Match value="{{ state.message.get() }}">
+          <Case pattern="Some(message)"><p id="payload">{{ format!("{}:{}", state.title, message.get()) }}</p></Case>
+          <Case pattern="None"><p id="absent">No message</p></Case>
+        </Match>
+      </div>
+    </If>
+    <ul>
+      <ForEach items="{{ state.jobs.get() }}" key="{{ |job| job.id }}">
+        <li>
+          <If condition="{{ item.get().id > 0 }}"><span>{{ format!("{}:{}:{}", state.title, index.get(), item.get().label) }}</span></If>
+          <JobRow job="{{ item.clone() }}" jobs="{{ state.jobs.clone() }}" pulse="{{ state.pulse.clone() }}" probes="{{ state.probes.clone() }}"></JobRow>
+        </li>
+      </ForEach>
+    </ul>
+  </section>
+</template>
+<template rust:component="Frame">
+  <div><Children></Children></div>
+</template>
+<template rust:component="JobRow">
+  <div>
+    <button id="row-count" on:click="state.clicks.update(|n| *n += 1)">{{ state.job.get().label }}:{{ state.clicks.get() }}</button>
+    <input id="row-draft" type="text" bind="state.draft">
+    <button id="row-remove" on:click="state.remove()">Remove</button>
+  </div>
+</template>
+<template rust:component="Controls">
+  <section id="controls">
+    <button id="activate" on:click="state.clicks.update(|n| *n += 1)">Activate</button>
+    <label id="draft-label" for="draft">Draft</label>
+    <If condition="{{ state.visible.get() }}">
+      <input id="draft" type="text" bind="state.draft" placeholder="Type a draft" on:focus="if state.remove_on_focus.get() { state.visible.set(false) }" on:blur="state.blurred.set(state.draft.touched())">
+    </If>
+    <input id="readonly" type="text" value="Read only" readonly>
+    <button id="disabled" disabled="{{ state.disabled.get() }}">Disabled</button>
+    <input id="hidden" type="text" class="hidden">
+    <label id="nested-label">Nested<input id="explicit" type="text" tabindex="-1"></label>
+    <p id="duplicate">Committed</p>
+    <If condition="{{ state.duplicate.get() }}"><p id="duplicate">Rejected</p></If>
+  </section>
+</template>

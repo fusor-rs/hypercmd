@@ -1,0 +1,24 @@
+[package]
+name = "job-inspector"
+edition.workspace = true
+rust-version.workspace = true
+publish = false
+
+[package.metadata.hypercmd]
+entry = "ui/app.html"
+templates = ["ui"]
+styles = ["ui/terminal.css"]
+
+[dependencies]
+hypercmd = { workspace = true, features = ["native"] }
+hypercmd-job-controls = { workspace = true, features = ["terminal"] }
+fusor.workspace = true
+fusor-components.workspace = true
+fusor-router.workspace = true
+fusor-async.workspace = true
+
+[build-dependencies]
+hypercmd-build.workspace = true
+
+[lints]
+workspace = true

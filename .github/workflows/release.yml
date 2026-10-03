@@ -1,0 +1,129 @@
+name: Release
+# Publishing a GitHub release tagged vX.Y.Z builds and tests the CLI for every
+# platform, attaches the archives to the release, and publishes every crate at
+# that version to crates.io. Running the workflow by hand only builds and tests
+# the binaries. See "Releasing" in CONTRIBUTING.md.
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+# Never run two releases at once, and never cancel one halfway.
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  binaries:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { os: ubuntu-24.04, target: x86_64-unknown-linux-musl }
+          - { os: ubuntu-24.04-arm, target: aarch64-unknown-linux-musl }
+          - { os: macos-15, target: aarch64-apple-darwin }
+          - { os: macos-15-intel, target: x86_64-apple-darwin }
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: ${{ matrix.target }}
+      - name: Read the version
+        id: version
+        run: echo "version=$(cargo metadata --no-deps --format-version 1 | jq -r '.packages[] | select(.name == "hypercmd-cli") | .version')" >> "$GITHUB_OUTPUT"
+      - run: cargo build --locked --release --target ${{ matrix.target }} -p hypercmd-cli
+      - name: Package the archive and its checksum
+        run: |
+          name="hypercmd-${{ steps.version.outputs.version }}-${{ matrix.target }}"
+          out="target/release-artifacts/v${{ steps.version.outputs.version }}"
+          mkdir -p "$out/$name"
+          cp "target/${{ matrix.target }}/release/hypercmd" LICENSE README.md "$out/$name/"
+          tar -czf "$out/$name.tar.gz" -C "$out" "$name"
+          rm -r "$out/$name"
+          (cd "$out" && { sha256sum "$name.tar.gz" 2>/dev/null || shasum -a 256 "$name.tar.gz"; } > "$name.tar.gz.sha256")
+      # Install from this job's archives with the real installer, then create
+      # and check a new app with the installed binary before anything is published.
+      - name: Test the installer and a new app
+        run: |
+          HYPERCMD_DOWNLOAD_BASE="file://$PWD/target/release-artifacts" HYPERCMD_INSTALL="$RUNNER_TEMP/hypercmd" \
+            sh install.sh "v${{ steps.version.outputs.version }}"
+          test "$("$RUNNER_TEMP/hypercmd/bin/hypercmd" --version)" = "hypercmd ${{ steps.version.outputs.version }}"
+          "$RUNNER_TEMP/hypercmd/bin/hypercmd" new "$RUNNER_TEMP/starter" --hypercmd-path .
+      - uses: actions/upload-artifact@v4
+        with:
+          name: hypercmd-${{ matrix.target }}
+          path: target/release-artifacts/v${{ steps.version.outputs.version }}/*
+          if-no-files-found: error
+
+  attach:
+    if: github.event_name == 'release'
+    needs: binaries
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+          merge-multiple: true
+      - run: gh release upload "$GITHUB_REF_NAME" artifacts/* --clobber --repo "$GITHUB_REPOSITORY"
+        env:
+          GH_TOKEN: ${{ github.token }}
+
+  crates-io:
+    if: github.event_name == 'release'
+    needs: binaries
+    runs-on: ubuntu-24.04
+    # Holds the CARGO_REGISTRY_TOKEN secret. Add required reviewers to this
+    # environment to approve each release before it uploads.
+    environment: crates-io
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@1.85
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - uses: Swatinem/rust-cache@v2
+      - uses: taiki-e/install-action@just
+      - name: Check the tag matches the version
+        run: |
+          version=$(cargo metadata --no-deps --format-version 1 | jq -r '.packages[] | select(.name == "hypercmd-cli") | .version')
+          if [ "$GITHUB_REF_NAME" != "v$version" ]; then
+            echo "::error::The release tag $GITHUB_REF_NAME does not match the workspace version v$version"
+            exit 1
+          fi
+      - run: just fetch
+      - run: just check
+      - run: cargo publish --workspace --locked --dry-run
+      # Skip crates already on crates.io at this version, so a rerun finishes a
+      # release that stopped halfway; `cargo publish` refuses to republish.
+      - name: Publish to crates.io
+        env:
+          CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
+        run: |
+          version=$(cargo metadata --no-deps --format-version 1 | jq -r '.packages[] | select(.name == "hypercmd-cli") | .version')
+          skip=() remaining=0
+          for name in $(cargo metadata --no-deps --format-version 1 | jq -r '.packages[] | select(.publish != []) | .name'); do
+            if curl -sf "https://index.crates.io/${name:0:2}/${name:2:2}/$name" | grep -q "\"vers\":\"$version\""; then
+              skip+=(--exclude "$name")
+            else
+              remaining=$((remaining + 1))
+            fi
+          done
+          if [ "$remaining" -eq 0 ]; then
+            echo "Every crate is on crates.io at $version."
+          else
+            cargo publish --workspace --locked "${skip[@]}"
+          fi

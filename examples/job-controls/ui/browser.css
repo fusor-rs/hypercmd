@@ -1,0 +1,5 @@
+.job { padding: 1rem; border: 1px solid #bac6d4; border-radius: .5rem; }
+.job-actions { display: flex; flex-wrap: wrap; gap: .5rem; }
+.job button { padding: .5rem .75rem; font: inherit; color: white; background: #174782; border: 0; border-radius: .25rem; cursor: pointer; }
+.job button:disabled { opacity: .55; cursor: default; }
+.job button:focus-visible { outline: 3px solid #bb7312; outline-offset: 3px; }

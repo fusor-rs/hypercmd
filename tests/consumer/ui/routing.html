@@ -1,0 +1,36 @@
+<template rust:component="Screens">
+  <main>
+    <button id="chrome" on:click="state.history.back()">Back</button>
+    <If condition="{{ state.visible.get() }}">
+      <section id="routing"><Router>
+        <Route path="/"><Home navigation="{{ state.work.navigation.clone() }}"></Home></Route>
+        <Route path="/redirect"><input id="redirect" on:focus='state.history.push("/teams/gamma/members/3")'></Route>
+        <Route path="/teams/:team/*" let="team">
+          <Team name="{{ team.team.clone() }}" work="{{ state.work.clone() }}"></Team>
+        </Route>
+        <Route fallback><p id="missing">Unknown screen</p></Route>
+      </Router></section>
+    </If>
+  </main>
+</template>
+<template rust:component="Team">
+  <section id="team">
+    <button id="team-counter" on:click="state.visits.update(|n| *n += 1)">{{ state.name }} {{ state.visits.get() }}</button>
+    <Router>
+      <Route path="members/:id" let="member">
+        <Member team="{{ state.name.clone() }}" id="{{ member.id.clone() }}" work="{{ state.work.clone() }}"></Member>
+      </Route>
+      <Route fallback><p>Unknown member</p></Route>
+    </Router>
+  </section>
+</template>
+<template rust:component="Home">
+  <button id="home" on:click="state.visits.update(|n| *n += 1)">Home {{ state.visits.get() }}</button>
+</template>
+<template rust:component="Member">
+  <section id="member">
+    <p id="member-name">{{ state.name }}</p>
+    <button id="member-counter" on:click="state.clicks.update(|n| *n += 1)">Member clicks {{ state.clicks.get() }}</button>
+    <button id="leave" on:click='state.history.push("/")'>Leave</button>
+  </section>
+</template>

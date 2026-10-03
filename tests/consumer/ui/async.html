@@ -1,0 +1,30 @@
+<template rust:component="Panel">
+  <div>
+    <button id="outside">Outside</button>
+    <If condition="{{ state.show.get() }}">
+      <Async boundary="{{ state.boundary }}"><section id="coherent">
+        <p>{{ state.revision.get() }}</p>
+        <Await value="{{ state.left }}" let="left"><p id="left">{{ left.as_str() }}</p></Await>
+        <Await value="{{ state.right }}" let="right"><p>{{ right.as_str() }}</p></Await>
+        <ul><ForEach items="{{ state.jobs.get() }}" key="{{ |job| job.id }}"><li><ReadRow job="{{ item.clone() }}" environment="{{ state.environment.clone() }}"></ReadRow></li></ForEach></ul>
+        <If condition="{{ state.speculative.get() }}"><ul><ForEach items="{{ vec![job(3, &quot;obsolete&quot;)] }}" key="{{ |job| job.id }}"><li><ReadRow job="{{ item.clone() }}" environment="{{ state.environment.clone() }}"></ReadRow></li></ForEach></ul></If>
+        <button id="inside" on:click="state.clicks.update(|value| *value += 1)">Inside</button>
+      </section></Async>
+    </If>
+  </div>
+</template>
+<template rust:component="ReadRow"><Await value="{{ state.read }}" let="value"><span>{{ value.as_str() }}</span></Await></template>
+<template rust:component="Editable"><input bind="state.value"></template>
+<template rust:component="Nested"><Async boundary="{{ state.boundary }}"><p>Nested</p></Async></template>
+<template rust:component="Routed"><div><Router><Route fallback><p>Route</p></Route></Router></div></template>
+<template rust:component="InvalidRegion">
+  <Async boundary="{{ state.boundary }}"><div>
+    <Match value="{{ state.choice.get() }}">
+      <Case pattern="0"><p>retained</p></Case>
+      <Case pattern="1"><Editable></Editable></Case>
+      <Case pattern="2"><Nested></Nested></Case>
+      <Case pattern="3"><Routed></Routed></Case>
+      <Case pattern="_"><div><If condition="{{ true }}"><p id="duplicate">A</p></If><If condition="{{ true }}"><p id="duplicate">B</p></If></div></Case>
+    </Match>
+  </div></Async>
+</template>
