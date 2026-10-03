@@ -56,7 +56,7 @@ mod unix {
     mod screen;
     use super::{Error, LayoutOptions, NativeOptions, Scope};
     use crate::{
-        Controller, Services,
+        Controller, Input, Services,
         input::{Decoded, Decoder},
         layout,
     };
@@ -93,6 +93,11 @@ mod unix {
     const SIGNAL: Token = Token(1);
     const TASK: Token = Token(2);
     const BYTES_PER_TURN: usize = 256;
+
+    #[cfg(target_os = "macos")]
+    const LINK_OPENER: &str = "open";
+    #[cfg(not(target_os = "macos"))]
+    const LINK_OPENER: &str = "xdg-open";
 
     pub(super) fn run(scope: &Scope, options: &NativeOptions) -> Result<(), Error> {
         if !io::stdin().is_terminal() || !io::stdout().is_terminal() {
@@ -263,7 +268,7 @@ mod unix {
                 self.apply_signals()?;
                 self.refresh()?;
                 if let Some(input) = self.decoder.expire(Instant::now()) {
-                    self.controller.handle(input)?;
+                    self.handle_input(input)?;
                     continue;
                 }
                 if self.ready {
@@ -325,12 +330,9 @@ mod unix {
                 Err(rustix::io::Errno::INTR) => return Ok(Reading::More),
                 Err(error) => return Err(io_error(&error.into())),
             };
-            for byte in &self.bytes[..count] {
-                match self.decoder.feed(*byte, Instant::now())? {
-                    Some(Decoded::Input(input)) => {
-                        self.controller.handle(input)?;
-                        check_fault(self.scope)?;
-                    }
+            for index in 0..count {
+                match self.decoder.feed(self.bytes[index], Instant::now())? {
+                    Some(Decoded::Input(input)) => self.handle_input(input)?,
                     Some(Decoded::Shutdown) => return Ok(Reading::Stop),
                     Some(Decoded::Suspend) => {
                         self.signals.suspend.store(true, Ordering::Release);
@@ -340,6 +342,40 @@ mod unix {
                 }
             }
             Ok(Reading::More)
+        }
+
+        fn handle_input(&mut self, input: Input) -> Result<(), Error> {
+            if let Err(error) = self.open_link(&input) {
+                self.scope.root.0.scene.report(error);
+            }
+            self.controller.handle(input)?;
+            check_fault(self.scope)
+        }
+
+        fn open_link(&self, input: &Input) -> Result<(), Error> {
+            let Input::Click { column, row } = input else {
+                return Ok(());
+            };
+            let Some(target) = self.controller.link_at(*column, *row) else {
+                return Ok(());
+            };
+            if !target.starts_with("https://") && !target.starts_with("http://") {
+                return Err(Error::terminal(
+                    "Link clicks require an HTTP(S) destination",
+                ));
+            }
+            let target = target.to_owned();
+            let opening = self
+                .services
+                .worker(&fusor_async::CancellationToken::default(), move |_| {
+                    launch_link(&target)
+                })?;
+            let scene = self.scope.root.0.scene.clone();
+            self.services.spawn(&self.scope.owner(), async move {
+                if let Err(error) = opening.await.and_then(std::convert::identity) {
+                    scene.report(error);
+                }
+            })
         }
 
         // Even a self-waking task must give newly ready keyboard and signal events
@@ -450,6 +486,25 @@ mod unix {
         }
         screen.draw(&presentation).io()?;
         controller.presented(presentation)
+    }
+
+    fn launch_link(target: &str) -> Result<(), Error> {
+        let output = std::process::Command::new(LINK_OPENER)
+            .arg(target)
+            .output()
+            .map_err(|error| {
+                Error::terminal(format!(
+                    "Cannot run {LINK_OPENER}: {error}; check your browser opener installation"
+                ))
+            })?;
+        if !output.status.success() {
+            return Err(Error::terminal(format!(
+                "{LINK_OPENER} failed ({}): {}; check your default browser",
+                output.status,
+                String::from_utf8_lossy(&output.stderr).trim()
+            )));
+        }
+        Ok(())
     }
 
     fn check_fault(scope: &Scope) -> Result<(), Error> {

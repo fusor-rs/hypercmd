@@ -73,12 +73,16 @@ the draft to keep the caret visible. Headings and
 with a recommendation to style a surrounding container.
 
 Anchors carry the complete `href` independently of the visible label. Native
-output uses [OSC 8 hyperlinks](https://iterm2.com/feature-reporting/Hyperlinks_in_Terminal_Emulators.html);
-activation follows the terminal's link gesture. Clipping does not shorten the
-destination. Empty destinations or destinations containing control characters or
-whitespace render as ordinary text. Hyperlinks inherit through nested inline
-styling, and a reactive destination change updates the link even when its label
-stays the same. Hosts using `layout::render` receive destinations in
+output uses [OSC 8 hyperlinks](https://iterm2.com/feature-reporting/Hyperlinks_in_Terminal_Emulators.html).
+A normal left click opens HTTP(S) destinations with `open` on macOS or `xdg-open`
+on other Unix systems, without requiring OSC 8 support. Opener failures appear
+in the diagnostic bar. Modifier-click gestures belong to the terminal emulator.
+Use a non-URL label for shortened destinations: terminal auto-detection can
+otherwise also open the visible text as a URL.
+Clipping does not shorten the destination. Empty destinations or destinations
+containing control characters or whitespace render as ordinary text. Hyperlinks
+inherit through nested inline styling, and a reactive destination change updates
+the link even when its label stays the same. Hosts using `layout::render` receive destinations in
 `Presentation::hyperlinks`, indexed by each visible glyph's starting cell.
 
 ## Text, clipping and limits

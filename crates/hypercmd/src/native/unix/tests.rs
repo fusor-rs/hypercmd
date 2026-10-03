@@ -203,6 +203,7 @@ fn exercise(mode: &str) {
     let mut command = CommandBuilder::new(std::env::current_exe().unwrap());
     command.args(["--ignored", "--exact", CHILD, "--nocapture"]);
     command.env("HYPERCMD_PTY_CASE", mode);
+    let link_log = (mode == "hyperlinks").then(|| link_opener(&mut command));
     let mut terminal = Terminal::spawn(command, 12, 60);
     if mode != "partial" {
         terminal.wait_for(0, "PTY_READY");
@@ -215,6 +216,16 @@ fn exercise(mode: &str) {
     terminal.wait_exit();
     terminal.assert_restored(mode != "partial");
     check_transcript(&terminal, mode);
+    if let Some(directory) = link_log {
+        let log = directory.join("opened");
+        assert_eq!(
+            std::fs::read_to_string(&log).unwrap(),
+            "1\nhttps://example.com/first/full-target\n1\nhttps://example.com/second/full-target\n"
+        );
+        std::fs::remove_file(log).unwrap();
+        std::fs::remove_file(directory.join(LINK_OPENER)).unwrap();
+        std::fs::remove_dir(directory).unwrap();
+    }
 }
 
 fn drive(terminal: &mut Terminal, mode: &str) {
@@ -363,12 +374,33 @@ fn append_link(scope: &mut Scope, target: &Signal<String>) {
 }
 
 fn drive_hyperlinks(terminal: &mut Terminal) {
-    for target in [
-        "https://example.com/first/full-target",
-        "https://example.com/second/full-target",
+    for (target, diagnostic) in [
+        ("https://example.com/first/full-target", "first"),
+        ("https://example.com/second/full-target", "second"),
     ] {
         let input = format!("\x01\x1b[200~{target}\x1b[201~");
         terminal.expect(input.as_bytes(), &format!("\x1b]8;;{target}\x1b\\"));
+        terminal.expect(b"\x1b[<0;2;4M", diagnostic);
     }
     terminal.send(b"\x1b[99;5u");
+}
+
+fn link_opener(command: &mut CommandBuilder) -> std::path::PathBuf {
+    use std::os::unix::fs::PermissionsExt;
+    let directory = std::env::temp_dir().join(format!("hypercmd-links-{}", std::process::id()));
+    std::fs::create_dir(&directory).unwrap();
+    let executable = directory.join(LINK_OPENER);
+    std::fs::write(
+        &executable,
+        r#"#!/bin/sh
+printf '%s\n' "$#" "$1" >> "$HYPERCMD_LINK_LOG"
+printf '%s\n' "${1#https://example.com/}" >&2
+exit 1
+"#,
+    )
+    .unwrap();
+    std::fs::set_permissions(executable, std::fs::Permissions::from_mode(0o700)).unwrap();
+    command.env("PATH", &directory);
+    command.env("HYPERCMD_LINK_LOG", directory.join("opened"));
+    directory
 }

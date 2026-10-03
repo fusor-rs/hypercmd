@@ -508,6 +508,21 @@ impl Controller {
             })
             .map(|entry| entry.node.clone())
     }
+    #[cfg(all(feature = "native", unix))]
+    pub(crate) fn link_at(&self, column: u16, row: u16) -> Option<&str> {
+        let node = self
+            .hit(column, row, false)
+            .unwrap_or_else(|| self.root.clone());
+        if !node.is_interactive() || node.is_disabled() {
+            return None;
+        }
+        self.presentation
+            .as_ref()?
+            .hyperlinks
+            .get(&(column, row))
+            .map(AsRef::as_ref)
+    }
+
     fn click(&mut self, column: u16, row: u16) -> Result<(), Error> {
         if let Some(node) = self.hit(column, row, false) {
             if node.tag() == "label" {
