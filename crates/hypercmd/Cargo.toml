@@ -36,5 +36,8 @@ mio = { version = "=1.1.0", features = ["os-poll", "os-ext"], optional = true }
 [dev-dependencies]
 portable-pty.workspace = true
 
+[target.'cfg(unix)'.dev-dependencies]
+rustix = { workspace = true, features = ["process"] }
+
 [lints]
 workspace = true

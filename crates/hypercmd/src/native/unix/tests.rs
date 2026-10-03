@@ -8,9 +8,15 @@ use portable_pty::{CommandBuilder, PtySize};
 #[path = "../../../../../tests/support/pty.rs"]
 mod pty;
 use pty::{Terminal, find};
-use std::{cell::Cell, rc::Rc, time::Duration};
+use rustix::process::{Pid, WaitOptions, waitpid};
+use std::{
+    cell::Cell,
+    rc::Rc,
+    time::{Duration, Instant},
+};
 
 const CHILD: &str = "native::unix::tests::pty_child";
+const LOAD_EDITS: usize = 4096;
 
 #[test]
 #[ignore = "subprocess entry point for terminal_pty"]
@@ -224,9 +230,11 @@ fn exercise(mode: &str) {
         } else if mode == "suspend" {
             terminal.send(&[26]);
             terminal.wait_for(0, "\x1b[?1049l");
+            wait_stopped(&terminal);
             terminal.assert_termios();
+            let resumed_at = terminal.transcript.len();
             terminal.signal("-CONT");
-            std::thread::sleep(Duration::from_millis(100));
+            terminal.wait_for(resumed_at, "\x1b[?2004h");
         } else if mode == "async" {
             terminal.wait_for(0, "TASK_AWAKE");
             terminal.assert_quiet();
@@ -235,7 +243,10 @@ fn exercise(mode: &str) {
         } else if mode == "terminate" {
             terminal.signal("-TERM");
         } else if mode == "load" {
-            terminal.send(&vec![b'x'; 4096]);
+            // Cross many input turns while a task continuously wakes itself.
+            // Keep the draft bounded so grapheme scans do not turn this into
+            // a growing-text throughput benchmark against the exit deadline.
+            terminal.send(&b"x\x7f".repeat(LOAD_EDITS / 2));
         }
         if !matches!(mode, "panic" | "limit" | "terminate") {
             terminal.send(&[3]);
@@ -255,6 +266,9 @@ fn exercise(mode: &str) {
     if mode == "normal" {
         assert!(text.contains("FINISHED edits=1"));
     }
+    if mode == "load" {
+        assert!(text.contains(&format!("FINISHED edits={LOAD_EDITS} value=\"\"")));
+    }
     if mode == "error" {
         assert!(text.contains("Limit: 1 earlier reactive errors omitted"));
         assert!(text.contains("Template: newest reactive error"));
@@ -264,5 +278,24 @@ fn exercise(mode: &str) {
         let restored = find(output, b"\x1b[?1049l").unwrap();
         let report = find(output, b"injected application panic").unwrap();
         assert!(restored < report, "panic was reported before restoration");
+    }
+}
+
+fn wait_stopped(terminal: &Terminal) {
+    // Screen restoration precedes SIGSTOP; sending SIGCONT before the stop
+    // takes effect would leave the child suspended indefinitely.
+    let pid = Pid::from_raw(terminal.child.process_id().unwrap().try_into().unwrap()).unwrap();
+    let deadline = Instant::now() + Duration::from_secs(5);
+    loop {
+        match waitpid(Some(pid), WaitOptions::UNTRACED | WaitOptions::NOHANG) {
+            Ok(Some((_, status))) => {
+                assert!(status.stopped(), "child did not stop: {status:?}");
+                return;
+            }
+            Ok(None) | Err(rustix::io::Errno::INTR) => {}
+            Err(error) => panic!("could not wait for child to stop: {error}"),
+        }
+        assert!(Instant::now() < deadline, "child did not stop");
+        std::thread::sleep(Duration::from_millis(10));
     }
 }
