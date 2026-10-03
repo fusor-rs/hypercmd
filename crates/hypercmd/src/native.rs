@@ -53,6 +53,7 @@ pub fn run_with(scope: Scope, options: &NativeOptions) -> Result<(), Error> {
 
 #[cfg(unix)]
 mod unix {
+    mod screen;
     use super::{Error, LayoutOptions, NativeOptions, Scope};
     use crate::{
         Controller, Services,
@@ -61,13 +62,17 @@ mod unix {
     };
     use crossterm::{
         cursor::Hide,
-        event::EnableBracketedPaste,
+        event::{
+            EnableBracketedPaste, EnableMouseCapture, KeyboardEnhancementFlags,
+            PushKeyboardEnhancementFlags,
+        },
         execute,
         terminal::{self, EnterAlternateScreen},
     };
     use mio::{Events, Interest, Poll, Token, unix::SourceFd};
-    use ratatui::{Terminal, backend::CrosstermBackend, style::Color};
+    use ratatui::style::Color;
     use rustix::fs::{OFlags, fcntl_setfl};
+    use screen::Screen;
     use signal_hook::{
         SigId,
         consts::{SIGCONT, SIGHUP, SIGINT, SIGSTOP, SIGTERM, SIGTSTP, SIGWINCH},
@@ -175,10 +180,9 @@ mod unix {
         Stop,
     }
 
-    // Fields drop in declaration order: the screen, then the session that restores
-    // the terminal, then the signal registrations.
+    // The session must restore the terminal before signal registrations are removed.
     struct Runner<'a> {
-        screen: Terminal<CrosstermBackend<io::Stdout>>,
+        screen: Screen,
         session: Session,
         signals: Signals,
         decoder: Decoder,
@@ -230,7 +234,7 @@ mod unix {
             let mut session = Session::default();
             session.enter(&mut io::stdout()).io()?;
             Ok(Self {
-                screen: Terminal::new(CrosstermBackend::new(io::stdout())).io()?,
+                screen: Screen::new(),
                 session,
                 signals,
                 decoder: Decoder::new(options.max_paste_bytes),
@@ -258,7 +262,10 @@ mod unix {
                 }
                 self.apply_signals()?;
                 self.refresh()?;
-                self.decoder.expire(Instant::now());
+                if let Some(input) = self.decoder.expire(Instant::now()) {
+                    self.controller.handle(input)?;
+                    continue;
+                }
                 if self.ready {
                     match self.read_input()? {
                         Reading::Stop => return Ok(()),
@@ -395,7 +402,7 @@ mod unix {
     fn draw(
         scope: &Scope,
         controller: &mut Controller,
-        screen: &mut Terminal<CrosstermBackend<io::Stdout>>,
+        screen: &mut Screen,
         size: (u16, u16),
         options: &LayoutOptions,
     ) -> Result<(), Error> {
@@ -441,11 +448,7 @@ mod unix {
                 );
             }
         }
-        screen
-            .draw(|frame| {
-                *frame.buffer_mut() = presentation.buffer.clone();
-            })
-            .io()?;
+        screen.draw(&presentation).io()?;
         controller.presented(presentation)
     }
 
@@ -493,6 +496,9 @@ mod unix {
         Alternate,
         HiddenCursor,
         BracketedPaste,
+        Mouse,
+        Keyboard,
+        Hyperlink,
     }
 
     impl ScreenMode {
@@ -501,6 +507,9 @@ mod unix {
                 Self::Alternate => b"\x1b[?1049l",
                 Self::HiddenCursor => b"\x1b[?25h",
                 Self::BracketedPaste => b"\x1b[?2004l",
+                Self::Keyboard => b"\x1b[<1u",
+                Self::Hyperlink => b"\x1b]8;;\x1b\\",
+                Self::Mouse => b"\x1b[?1006l\x1b[?1015l\x1b[?1003l\x1b[?1002l\x1b[?1000l",
             }
         }
     }
@@ -521,7 +530,17 @@ mod unix {
             self.modes.insert(ScreenMode::HiddenCursor);
             execute!(output, Hide)?;
             self.modes.insert(ScreenMode::BracketedPaste);
-            execute!(output, EnableBracketedPaste)
+            execute!(output, EnableBracketedPaste)?;
+            self.modes.insert(ScreenMode::Mouse);
+            execute!(output, EnableMouseCapture)?;
+            self.modes.insert(ScreenMode::Keyboard);
+            execute!(
+                output,
+                PushKeyboardEnhancementFlags(KeyboardEnhancementFlags::DISAMBIGUATE_ESCAPE_CODES)
+            )?;
+            self.modes.insert(ScreenMode::Hyperlink);
+            output.write_all(ScreenMode::Hyperlink.undo())?;
+            output.flush()
         }
 
         // Newest mode first; a mode whose undo fails stays active for the next attempt.

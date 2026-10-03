@@ -128,7 +128,7 @@ To run the examples from a checkout, use [`just`](https://github.com/casey/just)
 - **HTML stays HTML.** Components use native markup with Rust expressions for text, attributes, conditions, lists, routes and events. fusor's compiler lowers them; rustc checks them.
 - **Updates follow signal reads.** A binding tracks the signals it reads and updates its own node. hypercmd lays out and paints a frame only when the scene changed.
 - **CSS for the terminal.** A bounded stylesheet profile: flexbox layout, `ch` and percentage sizes, padding, gaps, colors, emphasis and scrollable overflow. Unsupported markup or CSS fails at build time instead of rendering differently.
-- **Keyboard first.** Focus order, Tab and arrow navigation, grapheme-aware text editing, bracketed paste and visible focus come built in.
+- **Keyboard first.** Focus order, Tab and arrow navigation, multiline grapheme-aware editing, bracketed paste, mouse scrolling and visible focus come built in.
 - **Ownership handles cleanup.** Removing a view disposes its listeners, stops its tasks and timers, and asks its background workers to cancel. The terminal is restored on exit, on panic and around Ctrl+Z.
 - **One component, two renderers.** A library can compile the same HTML and Rust for the terminal and for fusor's browser renderer.
 
@@ -168,8 +168,7 @@ hypercmd is v0.1 and experimental. Until 1.0, each minor release may change the 
 
 **Not supported yet:**
 
-- Mouse input in the native runner.
-- Margins, borders, positioning, grids, tables, media and SVG. See the [terminal profile](docs/profile.md) for the exact subset.
+- Margins, positioning, grids, merged table cells, media and SVG. See the [terminal profile](docs/profile.md) for the exact subset.
 - Nested `<Async>` boundaries, and editable controls or router outlets inside an async view.
 - East Asian ambiguous-width characters as two cells; they measure as one.
 

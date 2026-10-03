@@ -18,13 +18,15 @@ pub mod profile {
     /// Supported native HTML tags. Structural tags are lowered by fusor.
     pub const ELEMENTS: &[&str] = &[
         "main", "section", "div", "ul", "li", "p", "h1", "h2", "h3", "span", "strong", "em", "pre",
-        "br", "label", "button", "input",
+        "a", "br", "label", "button", "input", "textarea", "table", "thead", "tbody", "tr", "th",
+        "td",
     ];
-    /// Direct control events; there is no bubbling or browser event payload.
+    /// An asterisk matches every element; resize reports the content box.
     pub const EVENTS: &[(&str, &[&str])] = &[
+        ("*", &["keydown", "scroll", "resize", "focus", "blur"]),
         ("button", &["click"]),
-        ("text", &["input", "focus", "blur"]),
-        ("checkbox", &["change", "focus", "blur"]),
+        ("text", &["input"]),
+        ("checkbox", &["change"]),
     ];
 }
 
@@ -69,7 +71,7 @@ impl Backend for HypercmdBackend {
             capability,
             Capability::App
                 | Capability::Text
-                | Capability::Attribute("placeholder")
+                | Capability::Attribute("placeholder" | "href")
                 | Capability::Boolean("disabled" | "readonly")
                 | Capability::Value
                 | Capability::Checked
@@ -102,9 +104,9 @@ impl Backend for HypercmdBackend {
         let control = element.map(|(tag, attrs)| control_kind(tag, attrs));
         let supported = match capability {
             Capability::Event(event) => control.is_some_and(|kind| {
-                profile::EVENTS
-                    .iter()
-                    .any(|(control, events)| *control == kind && events.contains(&event))
+                profile::EVENTS.iter().any(|(control, events)| {
+                    (*control == "*" || *control == kind) && events.contains(&event)
+                })
             }),
             Capability::Bind(Control::Text) | Capability::Value => control == Some("text"),
             Capability::Attribute(name) | Capability::Boolean(name) => {
@@ -123,7 +125,10 @@ impl Backend for HypercmdBackend {
         if supported {
             Ok(())
         } else {
-            Err(origin.error("terminal-v1 rejects this binding/control pair; use click on button, input on text input, or change on checkbox (focus/blur on inputs)"))
+            Err(origin.error(
+                "terminal-v1 rejects this binding/control pair; use click on button, \
+                 input on a text control, change on checkbox, or keydown/scroll/resize/focus/blur",
+            ))
         }
     }
     fn validate(&self, template: &Template) -> Result<(), ExtractError> {
@@ -293,7 +298,9 @@ impl Backend for HypercmdBackend {
 }
 
 fn control_kind<'a>(tag: &'a str, attributes: &'a [fusor_build::backend::Attribute]) -> &'a str {
-    if tag == "input" {
+    if tag == "textarea" {
+        "text"
+    } else if tag == "input" {
         attributes
             .iter()
             .find(|attribute| attribute.name == "type")
@@ -308,12 +315,14 @@ fn is_control(kind: &str) -> bool {
 }
 fn attribute_allowed(tag: &str, kind: &str, name: &str) -> bool {
     match name {
-        "id" | "class" => true,
-        "type" | "value" => tag == "input",
+        "id" | "class" | "tabindex" | "autofocus" => true,
+        "type" => tag == "input",
+        "value" => matches!(tag, "input" | "textarea"),
         "checked" => kind == "checkbox",
-        "disabled" | "tabindex" => is_control(kind),
+        "disabled" => is_control(kind),
         "readonly" | "placeholder" => kind == "text",
         "for" => tag == "label",
+        "href" => tag == "a",
         _ => false,
     }
 }

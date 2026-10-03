@@ -2,6 +2,7 @@
 use fusor::{Effect, FromInputs, Memo, OwnerHandle, Registration, Signal, effect, signal};
 mod async_views;
 mod routing;
+mod workspace;
 use fusor_std::forms::TextField;
 use hypercmd::{Controller, Error, ErrorKind, Input, Key, KeyKind, Node};
 use std::{
@@ -480,7 +481,10 @@ fn key(controls: &mut Controller, key: Key, shift: bool) {
     controls
         .handle(Input::Key {
             key,
-            shift,
+            modifiers: hypercmd::Modifiers {
+                shift,
+                ..Default::default()
+            },
             kind: KeyKind::Press,
         })
         .unwrap();
@@ -554,7 +558,7 @@ fn activation_and_vertical_focus(harness: &mut ControlsHarness) {
     for kind in [KeyKind::Press, KeyKind::Repeat, KeyKind::Release] {
         let enter = Input::Key {
             key: Key::Enter,
-            shift: false,
+            modifiers: hypercmd::Modifiers::default(),
             kind,
         };
         controls.handle(enter).unwrap();
@@ -567,7 +571,7 @@ fn activation_and_vertical_focus(harness: &mut ControlsHarness) {
     key(controls, Key::Up, false);
     let release = Input::Key {
         key: Key::Down,
-        shift: false,
+        modifiers: hypercmd::Modifiers::default(),
         kind: KeyKind::Release,
     };
     controls.handle(release).unwrap();

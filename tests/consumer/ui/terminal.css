@@ -2,3 +2,6 @@
 input { width: 12ch; }
 input:focus { text-decoration: underline; }
 #controls { height: 100%; overflow: auto; }
+
+#multiline { height: 4ch; border-style: solid; }
+#viewport { height: 6ch; overflow: auto; border-style: rounded; border-color: cyan; }

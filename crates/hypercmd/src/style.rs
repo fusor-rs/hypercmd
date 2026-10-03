@@ -2,6 +2,7 @@
 use crate::Node;
 pub use ratatui::style::Color;
 use ratatui::style::{Modifier, Style};
+use std::rc::Rc;
 use taffy::{AlignItems, AlignSelf, Dimension, FlexDirection, JustifyContent, LengthPercentage};
 
 pub type StyleSheet = &'static [Rule];
@@ -55,6 +56,13 @@ pub enum Alignment {
 }
 
 #[derive(Clone, Copy, Debug)]
+pub enum BorderStyle {
+    None,
+    Solid,
+    Rounded,
+}
+
+#[derive(Clone, Copy, Debug)]
 pub enum Declaration {
     Display(bool),
     Row(bool),
@@ -83,6 +91,8 @@ pub enum Declaration {
     Bold(bool),
     Italic(bool),
     Underline(bool),
+    BorderStyle(BorderStyle),
+    BorderColor(Color),
 }
 
 #[derive(Clone)]
@@ -91,6 +101,9 @@ pub(crate) struct Computed {
     pub visual: Style,
     pub whitespace: WhiteSpace,
     pub overflow: Overflow,
+    pub border: BorderStyle,
+    pub border_color: Color,
+    pub hyperlink: Option<Rc<str>>,
 }
 
 impl Computed {
@@ -102,7 +115,7 @@ impl Computed {
     ) -> Self {
         let mut value = Self {
             layout: taffy::Style {
-                flex_direction: if node.tag() == "label" {
+                flex_direction: if matches!(node.tag(), "label" | "tr") {
                     FlexDirection::Row
                 } else {
                     FlexDirection::Column
@@ -112,6 +125,9 @@ impl Computed {
             visual: parent.map_or(Style::default(), |parent| parent.visual),
             whitespace: parent.map_or(WhiteSpace::Normal, |parent| parent.whitespace),
             overflow: Overflow::Visible,
+            border: BorderStyle::None,
+            border_color: Color::Reset,
+            hyperlink: hyperlink(node, parent),
         };
         match node.tag() {
             "pre" => value.whitespace = WhiteSpace::Pre,
@@ -119,10 +135,26 @@ impl Computed {
                 value.visual = value.visual.add_modifier(Modifier::BOLD)
             }
             "em" => value.visual = value.visual.add_modifier(Modifier::ITALIC),
+            "a" if value.hyperlink.is_some() => {
+                value.visual = value.visual.add_modifier(Modifier::UNDERLINED);
+            }
             "button" => {
                 value.layout.padding.left = LengthPercentage::Length(1.0);
                 value.layout.padding.right = LengthPercentage::Length(1.0);
                 if node.attribute("disabled").is_none() {
+                    value.visual = value.visual.add_modifier(Modifier::BOLD);
+                }
+            }
+            "textarea" => {
+                value.layout.size.height = Dimension::Length(3.0);
+                value.whitespace = WhiteSpace::Pre;
+            }
+            "th" | "td" => {
+                value.layout.size.width = Dimension::Length(16.0);
+                value.layout.size.height = Dimension::Length(1.0);
+                value.overflow = Overflow::Hidden;
+                value.whitespace = WhiteSpace::Pre;
+                if node.tag() == "th" {
                     value.visual = value.visual.add_modifier(Modifier::BOLD);
                 }
             }
@@ -135,7 +167,7 @@ impl Computed {
         }
         value.cascade(node.0.styles, node, focus);
         value.cascade(overrides, node, focus);
-        if focus == Some(node) {
+        if focus == Some(node) && matches!(node.tag(), "button" | "input") {
             value.visual = value.visual.add_modifier(Modifier::REVERSED);
         }
         value
@@ -200,6 +232,21 @@ impl Computed {
             Declaration::Bold(value) => self.modifier(Modifier::BOLD, value),
             Declaration::Italic(value) => self.modifier(Modifier::ITALIC, value),
             Declaration::Underline(value) => self.modifier(Modifier::UNDERLINED, value),
+            Declaration::BorderColor(value) => self.border_color = value,
+            Declaration::BorderStyle(value) => {
+                self.border = value;
+                let width = if matches!(value, BorderStyle::None) {
+                    0.0
+                } else {
+                    1.0
+                };
+                self.layout.border = taffy::Rect {
+                    left: LengthPercentage::Length(width),
+                    right: LengthPercentage::Length(width),
+                    top: LengthPercentage::Length(width),
+                    bottom: LengthPercentage::Length(width),
+                };
+            }
         }
     }
 
@@ -292,4 +339,18 @@ pub(crate) fn base_layout() -> taffy::Style {
         flex_shrink: 0.0,
         ..Default::default()
     }
+}
+
+fn hyperlink(node: &Node, parent: Option<&Computed>) -> Option<Rc<str>> {
+    if node.tag() != "a" {
+        return parent.and_then(|parent| parent.hyperlink.clone());
+    }
+    node.attribute("href")
+        .filter(|target| {
+            !target.is_empty()
+                && !target
+                    .chars()
+                    .any(|character| character.is_control() || character.is_whitespace())
+        })
+        .map(Rc::from)
 }

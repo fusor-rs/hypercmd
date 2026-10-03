@@ -19,18 +19,27 @@ result bounds.
 
 ## Input and focus
 
-See [the key table](controls.md) for focus, editing and activation. Escape is not a Back command.
+See [the key table](controls.md) for focus, editing and activation. Escape is delivered to application key handlers; it has no default Back action.
 
 Bracketed paste is enabled for the session. A recognized paste produces one
-edit; CRLF and other line breaks become spaces in single-line inputs. Embedded
+edit; CRLF and other line breaks become spaces in single-line inputs. Textareas
+normalize CRLF/CR to newlines and preserve tabs and line breaks. Embedded
 Ctrl+C, Enter and escape sequences are stored as replacement characters
 or spaces, so they cannot execute shortcuts. Terminals that do not report
 bracketed paste fall back to ordinary key handling: unmarked paste cannot be
 reliably distinguished from typing and can run shortcuts. An incomplete legacy
 escape sequence expires after 40 ms. Both normal (CSI) and application (SS3)
-cursor-key sequences are accepted. Mouse and enhanced keyboard negotiation are
-not enabled. Reported CSI-u repeat/release events are decoded; button activation
-ignores them. Legacy repeats may look like separate presses.
+cursor-key sequences are accepted. A bare Escape produces a key event when the
+sequence deadline expires. SGR mouse reporting is enabled for pointer focus,
+button activation, wheel scrolling and Shift+wheel horizontal scrolling; holding
+Shift for terminal text selection depends on the emulator. The session requests the
+[Kitty keyboard protocol's disambiguation mode](https://sw.kovidgoyal.net/kitty/keyboard-protocol/)
+and restores the previous mode on exit or suspend. Supporting terminals can
+report Command/Super combinations independently of ordinary keys. A shortcut
+reserved by the terminal or OS must be remapped there before the application can
+receive it. Reported CSI-u modifiers and repeat/release events are decoded;
+button activation ignores repeats/releases. Legacy repeats may look like
+separate presses.
 
 The visible focus marker does not depend on color. Foreground/background colors
 are disabled for `NO_COLOR` or unknown terminal capabilities. `TERM` containing
@@ -66,9 +75,9 @@ own subsequent signal policy. Arbitrary embedding and preservation of another
 library's signal-disposition ownership are not supported by this adapter.
 
 A session guard restores raw mode, alternate screen, cursor visibility and
-bracketed-paste mode on ordinary exit, I/O errors, partial setup failure and UI
-panic unwinding. UI panic text is delayed until restoration, then the panic
-resumes. Managed worker panics become service errors through their result future. Recoverable reactive errors preserve the committed subtree, occupy a
+bracketed-paste, mouse and keyboard modes, and closes hyperlinks on ordinary exit,
+I/O errors, partial setup failure and UI panic unwinding. UI panic text is delayed
+until restoration, then the panic resumes. Managed worker panics become service errors through their result future. Recoverable reactive errors preserve the committed subtree, occupy a
 reserved status row and are printed with their error kind after restoration;
 the diagnostic history keeps the newest 64 entries and visibly reports how many
 earlier errors were omitted. Input/I/O integrity errors

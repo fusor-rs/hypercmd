@@ -1,0 +1,22 @@
+<template rust:component="Workspace">
+  <main on:keydown="state.shortcut(&event)">
+    <button>Before editor</button>
+    <textarea id="multiline" autofocus bind="state.draft"></textarea>
+    <section id="viewport" tabindex="0" on:resize="state.resized(&event)">
+      <pre>first
+second
+third
+fourth
+fifth
+sixth
+seventh
+eighth</pre>
+    </section>
+    <table>
+      <thead><tr><th id="first-heading">City</th><th>Note</th></tr></thead>
+      <tbody><tr><td>東京</td><td id="second-cell">NULL</td></tr></tbody>
+    </table>
+    <p id="link-label"><a href="{{ state.draft.get() }}">https://example…</a></p>
+    <input id="single" value="{{ state.draft.get() }}" readonly>
+  </main>
+</template>

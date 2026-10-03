@@ -2,6 +2,7 @@
 mod bindings;
 pub mod coherent;
 mod controls;
+mod editor;
 mod error;
 #[cfg(feature = "native")]
 mod input;
@@ -16,10 +17,11 @@ mod structure;
 pub mod style;
 pub mod text;
 
-pub use controls::{Controller, EditorState, Input, Key, KeyKind};
+pub use controls::{Controller, Input, Key, KeyKind, Modifiers};
+pub use editor::EditorState;
 pub use error::{Error, ErrorKind, EventResult};
 pub use routes::History;
-pub use scene::{Event, Node};
+pub use scene::{Event, EventPayload, Node};
 #[doc(hidden)]
 pub use scope::component_scope;
 pub use scope::{Children, Component, Kind, Scope, StaticNode};

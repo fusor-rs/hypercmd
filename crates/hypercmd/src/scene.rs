@@ -14,6 +14,7 @@ pub(crate) struct Scene {
     pub errors: RefCell<Vec<Error>>,
     pub omitted: Cell<usize>,
     pub faulted: Cell<bool>,
+    pub requested_focus: RefCell<std::rc::Weak<NodeData>>,
     pub route_focus: RefCell<std::rc::Weak<NodeData>>,
 }
 
@@ -32,11 +33,40 @@ impl Scene {
     }
 }
 
-/// A terminal event has no browser payload or propagation semantics.
+#[derive(Clone, Debug)]
+pub enum EventPayload {
+    None,
+    Input(crate::Input),
+    Resize { width: u16, height: u16 },
+}
+
+/// Key and scroll events visit the target then its ancestors until handled.
 #[derive(Clone)]
 pub struct Event {
     pub name: &'static str,
     pub target: Node,
+    pub payload: EventPayload,
+    handled: Rc<Cell<bool>>,
+}
+
+impl Event {
+    pub(crate) fn new(name: &'static str, target: Node, payload: EventPayload) -> Self {
+        Self {
+            name,
+            target,
+            payload,
+            handled: Rc::default(),
+        }
+    }
+
+    /// Stop ancestor handlers and the controller's default gesture.
+    pub fn prevent_default(&self) {
+        self.handled.set(true);
+    }
+
+    pub fn default_prevented(&self) -> bool {
+        self.handled.get()
+    }
 }
 
 /// Stable identity. A retained handle becomes inert when its owner is disposed.
@@ -54,7 +84,8 @@ pub(crate) struct NodeData {
     pub children: RefCell<Vec<Node>>,
     pub listeners: RefCell<BTreeMap<&'static str, Vec<Listener>>>,
     pub value: RefCell<String>,
-    pub editor: RefCell<crate::controls::EditorState>,
+    pub editor: RefCell<crate::editor::EditorState>,
+    pub scroll_request: Cell<Option<(u16, u16)>>,
     pub checked: Cell<bool>,
     pub gate: RefCell<Option<Rc<crate::coherent::Gate>>>,
 }
@@ -105,6 +136,7 @@ impl Node {
             value: RefCell::new(attrs.get("value").cloned().unwrap_or_default()),
             checked: Cell::new(attrs.contains_key("checked")),
             editor: RefCell::default(),
+            scroll_request: Cell::default(),
             attrs: RefCell::new(attrs),
             text: RefCell::new(text.into()),
             children: RefCell::default(),
@@ -152,7 +184,7 @@ impl Node {
         Rc::ptr_eq(&self.0.component, &other.0.component)
     }
 
-    pub(crate) fn component_root(&self) -> Node {
+    pub fn component_root(&self) -> Node {
         self.0
             .component
             .root
@@ -202,8 +234,12 @@ impl Node {
     pub(crate) fn is_checkbox(&self) -> bool {
         self.attribute("type").as_deref() == Some("checkbox")
     }
+    pub(crate) fn is_editor(&self) -> bool {
+        self.tag() == "textarea" || (self.tag() == "input" && !self.is_checkbox())
+    }
     pub(crate) fn is_control(&self) -> bool {
-        matches!(self.tag(), "button" | "input")
+        matches!(self.tag(), "button" | "input" | "textarea")
+            || self.attribute("tabindex").is_some()
     }
     pub(crate) fn is_disabled(&self) -> bool {
         self.attribute("disabled").is_some()
@@ -220,7 +256,7 @@ impl Node {
             }
         }
     }
-    pub(crate) fn clamped_editor(&self, value: &str) -> crate::controls::EditorState {
+    pub(crate) fn clamped_editor(&self, value: &str) -> crate::editor::EditorState {
         let mut editor = self.editor();
         editor.clamp(value);
         editor
@@ -228,7 +264,7 @@ impl Node {
     pub fn value(&self) -> String {
         self.0.value.borrow().clone()
     }
-    pub fn editor(&self) -> crate::controls::EditorState {
+    pub fn editor(&self) -> crate::editor::EditorState {
         *self.0.editor.borrow()
     }
     pub fn checked(&self) -> bool {
@@ -274,7 +310,23 @@ impl Node {
             self.0.scene.changed();
         }
     }
+    /// Apply a cell offset on the next layout, clamped to the scrollable content.
+    pub fn scroll_to(&self, column: u16, row: u16) {
+        self.0.scroll_request.set(Some((column, row)));
+        self.0.scene.changed();
+    }
+
+    pub fn request_focus(&self) {
+        self.0.scene.requested_focus.replace(Rc::downgrade(&self.0));
+        self.0.scene.changed();
+    }
+
     pub fn dispatch(&self, name: &'static str) -> Result<(), Error> {
+        self.emit(&Event::new(name, self.clone(), EventPayload::None))
+    }
+
+    pub(crate) fn emit(&self, event: &Event) -> Result<(), Error> {
+        let name = event.name;
         if !self.is_interactive()
             || (matches!(name, "click" | "input" | "change") && self.is_disabled())
         {
@@ -297,14 +349,7 @@ impl Node {
                     "a listener cannot recursively dispatch itself",
                 )
             })?;
-            if let Err(error) = fusor::untrack(|| {
-                fusor::batch(|| {
-                    callback(Event {
-                        name,
-                        target: self.clone(),
-                    })
-                })
-            }) {
+            if let Err(error) = fusor::untrack(|| fusor::batch(|| callback(event.clone()))) {
                 self.0.scene.report(error);
             }
         }

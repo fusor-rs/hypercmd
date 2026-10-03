@@ -1,14 +1,8 @@
 use crate::{
-    Error, ErrorKind, Node,
+    Error, ErrorKind, Event, EventPayload, Node,
     layout::{Presentation, ScrollState},
-    text,
 };
-use ratatui::{
-    buffer::Buffer,
-    layout::{Position, Rect},
-    style::Modifier,
-};
-use unicode_segmentation::UnicodeSegmentation;
+use ratatui::layout::Position;
 
 pub(crate) const PASTE_LIMIT: usize = 64 * 1024;
 pub(crate) const EDIT_LIMIT: usize = 1024 * 1024;
@@ -28,6 +22,7 @@ pub enum Key {
     End,
     PageUp,
     PageDown,
+    Escape,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -37,12 +32,25 @@ pub enum KeyKind {
     Release,
 }
 
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+#[expect(
+    clippy::struct_excessive_bools,
+    reason = "keyboard modifier keys are independent and can be held together"
+)]
+pub struct Modifiers {
+    pub shift: bool,
+    pub control: bool,
+    pub alt: bool,
+    /// Command on macOS; Windows/Super on other platforms.
+    pub super_key: bool,
+}
+
 /// Host-normalized input. A reported paste is always one text edit.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Input {
     Key {
         key: Key,
-        shift: bool,
+        modifiers: Modifiers,
         kind: KeyKind,
     },
     Paste(String),
@@ -54,39 +62,8 @@ pub enum Input {
         column: u16,
         row: u16,
         rows: i32,
+        columns: i32,
     },
-}
-
-/// Byte offsets always refer to extended grapheme boundaries in the current draft.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
-pub struct EditorState {
-    pub cursor: usize,
-    pub anchor: Option<usize>,
-    pub scroll: usize,
-}
-
-impl EditorState {
-    pub(crate) fn clamp(&mut self, value: &str) {
-        self.cursor = boundary(value, self.cursor);
-        self.anchor = self.anchor.map(|anchor| boundary(value, anchor));
-    }
-    fn selection(&self) -> std::ops::Range<usize> {
-        let anchor = self.anchor.unwrap_or(self.cursor);
-        anchor.min(self.cursor)..anchor.max(self.cursor)
-    }
-}
-
-fn boundaries(value: &str) -> impl Iterator<Item = usize> {
-    value
-        .grapheme_indices(true)
-        .map(|(i, _)| i)
-        .chain([value.len()])
-}
-fn boundary(value: &str, offset: usize) -> usize {
-    boundaries(value)
-        .take_while(|i| *i <= offset)
-        .last()
-        .unwrap_or(0)
 }
 
 /// Focus, editor gestures and hit testing for one retained scene.
@@ -138,7 +115,29 @@ impl Controller {
             .filter(|entry| entry.node.is_control())
             .map(|entry| entry.node.clone())
             .collect();
+        let autofocus = presentation
+            .entries
+            .iter()
+            .find(|entry| {
+                entry.node.attribute("autofocus").is_some() && !previous.contains(&entry.node)
+            })
+            .map(|entry| entry.node.clone());
+        self.resize_events(&presentation)?;
         self.presentation = Some(presentation);
+        if self
+            .root
+            .0
+            .scene
+            .requested_focus
+            .borrow()
+            .upgrade()
+            .is_none()
+        {
+            if let Some(autofocus) = autofocus {
+                autofocus.request_focus();
+            }
+        }
+        self.apply_focus_request()?;
         let destination = self.root.0.scene.route_focus.take().upgrade().map(Node);
         let retained = self.focus.as_ref().is_some_and(|node| self.focusable(node));
         if !retained {
@@ -155,6 +154,47 @@ impl Controller {
         }
         if let Some(focus) = self.focus.clone().filter(|_| geometry_changed) {
             self.reveal(&focus);
+        }
+        Ok(())
+    }
+
+    fn apply_focus_request(&mut self) -> Result<(), Error> {
+        let requested = self
+            .root
+            .0
+            .scene
+            .requested_focus
+            .borrow()
+            .upgrade()
+            .map(Node);
+        if let Some(node) = requested.filter(|node| self.focusable(node)) {
+            self.root.0.scene.requested_focus.take();
+            self.set_focus(&node)?;
+        }
+        Ok(())
+    }
+
+    fn resize_events(&self, presentation: &Presentation) -> Result<(), Error> {
+        for entry in &presentation.entries {
+            if !entry.node.0.listeners.borrow().contains_key("resize") {
+                continue;
+            }
+            let size = (entry.content.width, entry.content.height);
+            let previous = self
+                .presentation
+                .as_ref()
+                .and_then(|previous| previous.entries.iter().find(|old| old.node == entry.node))
+                .map(|old| (old.content.width, old.content.height));
+            if previous != Some(size) {
+                entry.node.emit(&Event::new(
+                    "resize",
+                    entry.node.clone(),
+                    EventPayload::Resize {
+                        width: size.0,
+                        height: size.1,
+                    },
+                ))?;
+            }
         }
         Ok(())
     }
@@ -253,16 +293,16 @@ impl Controller {
                     .entries
                     .iter()
                     .find(|entry| {
-                        entry.node.tag() == "input"
+                        matches!(entry.node.tag(), "input" | "textarea")
                             && entry.node.attribute("id").as_ref() == Some(&id)
                             && entry.node.same_component(label)
                     })
                     .map(|entry| entry.node.clone())
             })
         } else {
-            label
-                .descendants()
-                .find(|node| node.tag() == "input" && node.same_component(label))
+            label.descendants().find(|node| {
+                matches!(node.tag(), "input" | "textarea") && node.same_component(label)
+            })
         };
         if let Some(control) = control {
             self.set_focus(&control)?;
@@ -274,33 +314,36 @@ impl Controller {
         self.reconcile(&previous)?;
         match input {
             Input::Key {
-                kind: KeyKind::Release,
-                ..
-            } => {}
-            Input::Key {
-                key: Key::Tab,
-                shift,
-                ..
-            } => self.tab(shift)?,
-            Input::Key {
-                key: key @ (Key::Up | Key::Down),
-                ..
-            } => self.vertical(key == Key::Up)?,
-            Input::Key { key, shift, kind } => self.key(key, shift, kind)?,
+                key,
+                modifiers,
+                kind,
+            } => {
+                self.keyboard(key, modifiers, kind)?;
+            }
             Input::Paste(value) => {
                 if value.len() > self.paste_limit {
                     return Err(Error::limit("paste exceeds configured byte limit"));
                 }
-                let value = text::sanitize(&value, false);
-                self.insert(&value)?;
+                if let Some(node) = self.focus.as_ref().filter(|node| node.is_editor()) {
+                    let value = crate::text::sanitize(&value, node.tag() == "textarea");
+                    crate::editor::insert(node, &value, self.edit_limit)?;
+                }
             }
             Input::Click { column, row } => self.click(column, row)?,
-            Input::Scroll { column, row, rows } => {
+            input @ Input::Scroll {
+                column,
+                row,
+                rows,
+                columns,
+            } => {
                 if let Some(node) = self.hit(column, row, true) {
-                    self.scrolls.scroll(&node, 0, rows);
+                    if !self.bubble("scroll", &node, input)? {
+                        self.scrolls.scroll(&node, columns, rows);
+                    }
                 }
             }
         }
+        self.apply_focus_request()?;
         self.reconcile(&previous)
     }
     fn tab(&mut self, reverse: bool) -> Result<(), Error> {
@@ -359,103 +402,96 @@ impl Controller {
         self.scrolls
             .scroll(&entry.node, 0, if up { -rows } else { rows });
     }
-    fn key(&mut self, key: Key, shift: bool, kind: KeyKind) -> Result<(), Error> {
+    fn keyboard(&mut self, key: Key, modifiers: Modifiers, kind: KeyKind) -> Result<(), Error> {
+        if kind == KeyKind::Release {
+            return Ok(());
+        }
+        if key == Key::Tab && !modifiers.control && !modifiers.alt && !modifiers.super_key {
+            return self.tab(modifiers.shift);
+        }
         let Some(node) = self.focus.clone().filter(Node::is_interactive) else {
             return Ok(());
         };
-        if matches!(key, Key::PageUp | Key::PageDown) {
+        if self.bubble(
+            "keydown",
+            &node,
+            Input::Key {
+                key,
+                modifiers,
+                kind,
+            },
+        )? || modifiers.super_key
+        {
+            return Ok(());
+        }
+        if matches!(key, Key::PageUp | Key::PageDown) && !modifiers.control && !modifiers.alt {
             self.page_viewport_containing(&node, key == Key::PageUp);
-        } else if node.tag() == "button" {
-            if kind == KeyKind::Press && matches!(key, Key::Enter | Key::Char(' ')) {
-                activate(&node)?;
-            }
-        } else if node.is_checkbox() {
-            if kind == KeyKind::Press && key == Key::Char(' ') {
-                activate(&node)?;
-            }
-        } else if let Key::Char(character) = key {
-            if !character.is_control() {
-                self.insert(&character.to_string())?;
-            }
-        } else {
-            self.edit_key(&node, key, shift)?;
+            return Ok(());
+        }
+        if matches!(key, Key::Up | Key::Down)
+            && node.tag() == "input"
+            && !modifiers.control
+            && !modifiers.alt
+        {
+            return self.vertical(key == Key::Up);
+        }
+        if node.is_editor() {
+            return crate::editor::key(&node, key, modifiers, self.edit_limit);
+        }
+        if modifiers.control || modifiers.alt {
+            return Ok(());
+        }
+        if self.scroll_panel(&node, key) {
+            return Ok(());
+        } else if matches!(key, Key::Up | Key::Down) {
+            self.vertical(key == Key::Up)?;
+        } else if kind == KeyKind::Press
+            && (key == Key::Char(' ') || (key == Key::Enter && node.tag() == "button"))
+        {
+            activate(&node)?;
         }
         Ok(())
     }
-    fn insert(&mut self, inserted: &str) -> Result<(), Error> {
-        let Some(node) = self
-            .focus
-            .clone()
-            .filter(is_editor)
-            .filter(Node::is_interactive)
+
+    fn scroll_panel(&mut self, node: &Node, key: Key) -> bool {
+        if node.attribute("tabindex").is_none() {
+            return false;
+        }
+        let (columns, rows) = match key {
+            Key::Up => (0, -1),
+            Key::Down => (0, 1),
+            Key::Left => (-1, 0),
+            Key::Right => (1, 0),
+            Key::Home => (0, -i32::from(u16::MAX)),
+            Key::End => (0, i32::from(u16::MAX)),
+            _ => return false,
+        };
+        self.scrolls.scroll(node, columns, rows);
+        true
+    }
+
+    fn bubble(&self, name: &'static str, target: &Node, input: Input) -> Result<bool, Error> {
+        let event = Event::new(name, target.clone(), EventPayload::Input(input));
+        target.emit(&event)?;
+        let Some(presentation) = &self.presentation else {
+            return Ok(event.default_prevented());
+        };
+        let Some(entry) = presentation
+            .entries
+            .iter()
+            .find(|entry| entry.node == *target)
         else {
-            return Ok(());
+            return Ok(event.default_prevented());
         };
-        if node.attribute("readonly").is_some() {
-            return Ok(());
+        for index in entry.ancestors.iter().rev() {
+            if event.default_prevented() {
+                break;
+            }
+            presentation.entries[*index].node.emit(&event)?;
         }
-        let mut value = node.value();
-        let mut editor = node.clamped_editor(&value);
-        let selection = editor.selection();
-        if value.len() - selection.len() + inserted.len() > self.edit_limit {
-            return Err(Error::limit("edited value exceeds configured byte limit"));
-        }
-        value.replace_range(selection.clone(), inserted);
-        editor.cursor = boundary(&value, selection.start + inserted.len());
-        editor.anchor = None;
-        node.0.editor.replace(editor);
-        node.edit(value)
+        Ok(event.default_prevented())
     }
-    fn edit_key(&mut self, node: &Node, key: Key, shift: bool) -> Result<(), Error> {
-        let mut value = node.value();
-        let mut editor = node.clamped_editor(&value);
-        let next = boundaries(&value)
-            .find(|i| *i > editor.cursor)
-            .unwrap_or(value.len());
-        let previous = boundaries(&value)
-            .take_while(|i| *i < editor.cursor)
-            .last()
-            .unwrap_or(0);
-        if matches!(key, Key::Backspace | Key::Delete) {
-            if node.attribute("readonly").is_some() {
-                return Ok(());
-            }
-            let mut range = editor.selection();
-            if range.is_empty() {
-                range = if key == Key::Backspace {
-                    previous..editor.cursor
-                } else {
-                    editor.cursor..next
-                };
-            }
-            if range.is_empty() {
-                return Ok(());
-            }
-            value.replace_range(range.clone(), "");
-            editor.cursor = range.start;
-            editor.anchor = None;
-            node.0.editor.replace(editor);
-            return node.edit(value);
-        }
-        let cursor = match key {
-            Key::Left if !shift && !editor.selection().is_empty() => editor.selection().start,
-            Key::Right if !shift && !editor.selection().is_empty() => editor.selection().end,
-            Key::Left => previous,
-            Key::Right => next,
-            Key::Home => 0,
-            Key::End => value.len(),
-            _ => return Ok(()),
-        };
-        editor.anchor = if shift {
-            Some(editor.anchor.unwrap_or(editor.cursor))
-        } else {
-            None
-        };
-        editor.cursor = cursor;
-        node.0.editor.replace(editor);
-        self.root.0.scene.changed();
-        Ok(())
-    }
+
     fn hit(&self, column: u16, row: u16, scroll: bool) -> Option<Node> {
         self.presentation
             .as_ref()?
@@ -477,7 +513,25 @@ impl Controller {
             if node.tag() == "label" {
                 return self.focus_label(&node);
             }
-            self.set_focus(&node)?;
+            let target = self.presentation.as_ref().and_then(|presentation| {
+                let entry = presentation
+                    .entries
+                    .iter()
+                    .find(|entry| entry.node == node)?;
+                std::iter::once(&node)
+                    .chain(
+                        entry
+                            .ancestors
+                            .iter()
+                            .rev()
+                            .map(|index| &presentation.entries[*index].node),
+                    )
+                    .find(|node| self.focusable(node))
+                    .cloned()
+            });
+            if let Some(target) = target {
+                self.set_focus(&target)?;
+            }
             if self.focus.as_ref() != Some(&node) || !self.focusable(&node) {
                 return Ok(());
             }
@@ -491,7 +545,7 @@ impl Controller {
         let Some(node) = self
             .focus
             .as_ref()
-            .filter(|node| is_editor(node) && node.is_active())
+            .filter(|node| node.is_editor() && node.is_active())
         else {
             return;
         };
@@ -506,62 +560,10 @@ impl Controller {
             .content
             .intersection(entry.clip)
             .intersection(presentation.buffer.area);
-        if rect.is_empty() {
-            return;
-        }
-        let value = node.value();
-        let mut editor = node.clamped_editor(&value);
-        let cursor = text::width(&text::sanitize(&value[..editor.cursor], false));
-        editor.scroll = editor.scroll.min(cursor);
-        if cursor >= editor.scroll + usize::from(rect.width) {
-            editor.scroll = cursor + 1 - usize::from(rect.width);
-        }
-        let displayed = node.display_value();
-        paint_draft(&mut presentation.buffer, rect, &displayed, &editor, cursor);
-        node.0.editor.replace(editor);
+        crate::editor::paint(node, &mut presentation.buffer, rect);
     }
 }
 
-fn paint_draft(
-    buffer: &mut Buffer,
-    rect: Rect,
-    displayed: &str,
-    editor: &EditorState,
-    cursor: usize,
-) {
-    let selection = editor.selection();
-    for x in rect.x..rect.right() {
-        if let Some(cell) = buffer.cell_mut((x, rect.y)) {
-            cell.set_symbol(" ");
-        }
-    }
-    let mut column = 0;
-    for (byte, grapheme) in displayed.grapheme_indices(true) {
-        let safe = text::sanitize(grapheme, false);
-        let width = text::width(&safe);
-        let start = column;
-        column += width;
-        let visible = width > 0
-            && start >= editor.scroll
-            && column <= editor.scroll + usize::from(rect.width);
-        let x = rect.x + start.saturating_sub(editor.scroll) as u16;
-        let Some(cell) = visible.then(|| buffer.cell_mut((x, rect.y))).flatten() else {
-            continue;
-        };
-        cell.set_symbol(&safe);
-        if selection.contains(&byte) {
-            cell.modifier.toggle(Modifier::REVERSED);
-        }
-    }
-    let x = rect.x + (cursor - editor.scroll) as u16;
-    if let Some(cell) = buffer.cell_mut((x, rect.y)) {
-        cell.modifier.toggle(Modifier::UNDERLINED);
-    }
-}
-
-fn is_editor(node: &Node) -> bool {
-    node.tag() == "input" && !node.is_checkbox()
-}
 fn contains(root: &Node, target: &Node) -> bool {
     root.descendants().any(|node| node == *target)
 }

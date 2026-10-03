@@ -1,6 +1,7 @@
 //! Unicode policy shared by text measurement, painting and editing.
 use crate::style::WhiteSpace;
 use ratatui::style::Style;
+use std::rc::Rc;
 use unicode_segmentation::UnicodeSegmentation;
 use unicode_width::UnicodeWidthStr;
 
@@ -31,10 +32,33 @@ pub fn width(text: &str) -> usize {
     UnicodeWidthStr::width(text)
 }
 
+/// Single-line cell preview; terminal controls are sanitized and graphemes remain whole.
+pub fn ellipsize(value: &str, columns: usize) -> String {
+    let safe = sanitize(value, false);
+    if width(&safe) <= columns {
+        return safe;
+    }
+    if columns == 0 {
+        return String::new();
+    }
+    let mut used = 0;
+    let mut result = String::new();
+    for cluster in unicode_segmentation::UnicodeSegmentation::graphemes(safe.as_str(), true) {
+        used += width(cluster);
+        if used >= columns {
+            break;
+        }
+        result.push_str(cluster);
+    }
+    result.push('…');
+    result
+}
+
 #[derive(Clone)]
 pub(crate) struct Run {
     pub text: String,
     pub style: Style,
+    pub hyperlink: Option<Rc<str>>,
     pub line_break: bool,
     pub whitespace: WhiteSpace,
 }
@@ -43,6 +67,7 @@ pub(crate) struct Run {
 pub(crate) struct Glyph {
     pub text: String,
     pub style: Style,
+    pub hyperlink: Option<Rc<str>>,
     pub width: usize,
 }
 
@@ -74,27 +99,27 @@ pub(crate) fn lines(runs: &[Run], width: Option<usize>) -> Vec<Vec<Glyph>> {
         }
         if run.whitespace == WhiteSpace::Normal && cluster.chars().all(char::is_whitespace) {
             if wrapped.column > 0 {
-                pending_space = Some(run.style);
+                pending_space = Some(run);
             }
             continue;
         }
-        if let Some(style) = pending_space.take() {
-            wrapped.push(" ", style, WhiteSpace::Normal);
+        if let Some(run) = pending_space.take() {
+            wrapped.push(" ", run);
         }
         match cluster {
             "\n" => wrapped.break_line(),
             "\t" => {
                 for _ in 0..(TAB_STOP - wrapped.column % TAB_STOP) {
-                    wrapped.push(" ", run.style, run.whitespace);
+                    wrapped.push(" ", run);
                 }
             }
-            _ => wrapped.push(cluster, run.style, run.whitespace),
+            _ => wrapped.push(cluster, run),
         }
     }
     wrapped.finish()
 }
 
-const TAB_STOP: usize = 4;
+pub(crate) const TAB_STOP: usize = 4;
 
 struct WrappedLines {
     lines: Vec<Vec<Glyph>>,
@@ -116,7 +141,7 @@ impl WrappedLines {
         self.column = 0;
     }
 
-    fn push(&mut self, cluster: &str, style: Style, whitespace: WhiteSpace) {
+    fn push(&mut self, cluster: &str, run: &Run) {
         let cells = width(cluster);
         if cells == 0 {
             return;
@@ -124,9 +149,9 @@ impl WrappedLines {
         let overflows = self
             .limit
             .is_some_and(|limit| self.column > 0 && self.column + cells > limit);
-        if whitespace != WhiteSpace::Pre && overflows {
+        if run.whitespace != WhiteSpace::Pre && overflows {
             self.break_line();
-            if cluster == " " && whitespace == WhiteSpace::Normal {
+            if cluster == " " && run.whitespace == WhiteSpace::Normal {
                 return;
             }
         }
@@ -135,7 +160,8 @@ impl WrappedLines {
             .expect("a text line exists")
             .push(Glyph {
                 text: cluster.into(),
-                style,
+                style: run.style,
+                hyperlink: run.hyperlink.clone(),
                 width: cells,
             });
         self.column += cells;

@@ -53,6 +53,8 @@ pub const PROPERTIES: &[(&str, &str, &str)] = &[
     ("font-weight", "Bold", "bold | normal"),
     ("font-style", "Italic", "italic | normal"),
     ("text-decoration", "Underline", "underline | none"),
+    ("border-style", "BorderStyle", "none | solid | rounded"),
+    ("border-color", "BorderColor", COLOR),
 ];
 
 pub(crate) fn parse(source: &str) -> Result<Vec<TokenStream>, (usize, String)> {

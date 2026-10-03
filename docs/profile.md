@@ -6,11 +6,12 @@ properties, values and selector syntax fail explicitly. Rust expressions are
 lowered by fusor, not rewritten by the terminal compiler.
 
 Containers are `main`, `section`, `div`, `ul`, `li`, `p`, `h1`–`h3`, `pre` and
-`label`. Inline text supports `span`, `strong`, `em` and `br`. Controls are
+`label`. Inline text supports `span`, `strong`, `em`, `br`, and `a href="…"`. Controls are
 `button`, `input type="text"` (also the default type) and
-`input type="checkbox"`. See [the control reference](controls.md) for bindings and events;
+`input type="checkbox"`, and `textarea`. Tables use `table`, `thead`, `tbody`, `tr`,
+`th`, and `td`. See [the control reference](controls.md) for bindings and events;
 static attributes are validated in [backend.rs](../crates/hypercmd-build/src/backend.rs). Document shells, browser layout repair,
-media, tables, SVG, canvas, scripts, styles in HTML, hydration and JavaScript
+media, SVG, canvas, scripts, styles in HTML, hydration and JavaScript
 are rejected. Put stylesheets in package metadata.
 
 ## Stylesheets and delivery
@@ -42,7 +43,10 @@ The validation-backed `hypercmd profile` table is authoritative:
 
 ANSI names are `black`, `red`, `green`, `yellow`, `blue`, `magenta`, `cyan`,
 `white` and their `bright-` variants. `gray` aliases `white`. Font families,
-borders, margins, positioning, grids and animations are outside this profile.
+margins, positioning, grids and animations are outside this profile.
+`border-style: solid | rounded | none` draws a one-cell border, and `border-color`
+accepts the same colors as text. Borders occupy layout space. Bordered automatic
+scroll panes show a vertical scroll-position indicator on their right edge.
 
 One `ch` is one terminal cell, including one row vertically. Percentages
 require a definite parent axis: the viewport, an explicit resolved size, a
@@ -52,15 +56,30 @@ it does not silently become `auto`. As in the CSS sizing used by Taffy, percenta
 padding on all four sides uses the parent's width. `px`, `em`, viewport and
 physical units are rejected.
 
-Containers default to column layout; labels default to rows. Flex items default
+Containers default to column layout; labels and table rows default to rows.
+Table cells default to 16×1 cells with clipped, unwrapped content; headers are
+bold. Set matching widths on `th` and `td`, or use equal flex growth for columns
+that share the available width. There is no browser intrinsic column sizing or
+cell spanning. Tables use ordinary retained nodes; applications can use the
+content-box `resize` event to render only the visible rows and columns. Flex items default
 to `flex-shrink: 0` so content remains scrollable instead of disappearing under
 vertical pressure. Buttons have one cell of horizontal padding and bold labels
 when enabled; authored CSS can override both. Controls inherit terminal colors
 instead of assuming a dark background. Inputs default to 16×1 cells; checkboxes
-to 3×1. Headings and
+to 3×1. Textareas default to three rows, preserve newlines and tabs, and scroll
+the draft to keep the caret visible. Headings and
 `strong` are bold, and `em` is italic. Inline runs accept text styling and
 `display:none`; geometry, flex and overflow declarations on inline runs fail
 with a recommendation to style a surrounding container.
+
+Anchors carry the complete `href` independently of the visible label. Native
+output uses [OSC 8 hyperlinks](https://iterm2.com/feature-reporting/Hyperlinks_in_Terminal_Emulators.html);
+activation follows the terminal's link gesture. Clipping does not shorten the
+destination. Empty destinations or destinations containing control characters or
+whitespace render as ordinary text. Hyperlinks inherit through nested inline
+styling, and a reactive destination change updates the link even when its label
+stays the same. Hosts using `layout::render` receive destinations in
+`Presentation::hyperlinks`, indexed by each visible glyph's starting cell.
 
 ## Text, clipping and limits
 
@@ -94,7 +113,9 @@ processing is capped at 256 levels. Zero-sized viewports produce empty buffers.
 resize/removal and lets keyboard focus reveal a control. Painting clips against
 the viewport and every clipping ancestor. Hit testing uses the last presented
 layout. Full dirty frames use Ratatui's buffer diff; settled state submits no
-new frames. Focus always includes reverse video in addition to stylesheet rules.
+new frames. Buttons and single-line inputs use reverse video for focus.
+Textareas show an underlined caret; focusable containers use authored `:focus`
+styles, such as changing a rounded border to a solid border.
 Controls entirely behind hidden overflow or the root viewport are excluded from
 focus unless scrolling an automatic viewport can reveal them. Manual scrolling
 does not reset focus visibility; resize and keyed geometry changes reveal the

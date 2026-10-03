@@ -93,6 +93,9 @@ fn child_scope(mode: &str) -> (Scope, Signal<String>, Rc<Cell<usize>>) {
     .unwrap();
     let value = fusor::signal(String::new());
     scope.bind_text(0, value.clone()).unwrap();
+    if mode == "hyperlinks" {
+        append_link(&mut scope, &value);
+    }
     let edits = Rc::new(Cell::new(0));
     let count = edits.clone();
     scope
@@ -180,6 +183,7 @@ fn terminal_pty() {
         "terminate",
         "async",
         "worker_panic",
+        "hyperlinks",
     ] {
         exercise(mode);
     }
@@ -215,6 +219,7 @@ fn exercise(mode: &str) {
 
 fn drive(terminal: &mut Terminal, mode: &str) {
     match mode {
+        "hyperlinks" => drive_hyperlinks(terminal),
         "normal" => {
             assert_quiet(terminal);
             terminal.send(b"\x1b[200~a\x03\r\n\x1b]52;c;bad\x07\x1b[201~");
@@ -334,4 +339,36 @@ fn wait_stopped(terminal: &Terminal) {
         assert!(Instant::now() < deadline, "child did not stop");
         std::thread::sleep(Duration::from_millis(10));
     }
+}
+
+fn append_link(scope: &mut Scope, target: &Signal<String>) {
+    let mut link = Scope::new(
+        Some(&scope.owner()),
+        &[
+            StaticNode {
+                parent: None,
+                kind: Kind::Element("a", &[], Some(0)),
+            },
+            txt(0, "https://example…"),
+        ],
+    )
+    .unwrap();
+    let target = target.clone();
+    link.attribute(0, "href", move || target.get()).unwrap();
+    let mut children = scope.root().children();
+    children.push(link.root());
+    scope.root().set_children(children).unwrap();
+    link.publish();
+    scope.retain(link);
+}
+
+fn drive_hyperlinks(terminal: &mut Terminal) {
+    for target in [
+        "https://example.com/first/full-target",
+        "https://example.com/second/full-target",
+    ] {
+        let input = format!("\x01\x1b[200~{target}\x1b[201~");
+        terminal.expect(input.as_bytes(), &format!("\x1b]8;;{target}\x1b\\"));
+    }
+    terminal.send(b"\x1b[99;5u");
 }
