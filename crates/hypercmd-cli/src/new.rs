@@ -55,10 +55,12 @@ fn package_name(path: &Path) -> Result<String> {
         .file_name()
         .and_then(|name| name.to_str())
         .unwrap_or_default();
-    let usable = name.starts_with(|c: char| c.is_ascii_lowercase())
-        && name
-            .chars()
-            .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-' || c == '_')
+    let usable = name.starts_with(|first: char| first.is_ascii_lowercase())
+        && name.chars().all(|character| {
+            character.is_ascii_lowercase()
+                || character.is_ascii_digit()
+                || matches!(character, '-' | '_')
+        })
         && !["test", "core", "std", "alloc", "self", "super", "crate"].contains(&name);
     if !usable {
         return Err(format!(

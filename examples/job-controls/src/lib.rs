@@ -61,7 +61,16 @@ mod row {
     #[cfg(feature = "terminal")]
     fusor::template!(backend = "hypercmd", "ui/job.html");
     #[cfg(feature = "browser")]
-    fusor::template!("ui/job.html");
+    #[expect(
+        clippy::too_many_lines,
+        clippy::excessive_nesting,
+        clippy::redundant_clone,
+        reason = "fusor-build 0.1.4's DOM codegen leaves these unsuppressed in generated mount code"
+    )]
+    mod dom {
+        use super::JobRow;
+        fusor::template!("ui/job.html");
+    }
 }
 #[cfg(any(feature = "terminal", feature = "browser"))]
 pub use row::JobRow;

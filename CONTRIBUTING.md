@@ -54,3 +54,5 @@ don't open pull requests or issues generated without that review.
 
 hypercmd's own development uses AI tools heavily too, mainly Claude Code, and the
 maintainer works under the same rules.
+Coding agents follow `AGENTS.md`, which is also the code standard for every
+change.

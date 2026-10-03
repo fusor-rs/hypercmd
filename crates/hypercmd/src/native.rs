@@ -21,7 +21,7 @@ impl Default for NativeOptions {
 /// Run a prepared root for the terminal application lifetime.
 /// See [`run_with`] for the process-signal lifetime contract.
 pub fn run(scope: Scope) -> Result<(), Error> {
-    run_with(scope, NativeOptions::default())
+    run_with(scope, &NativeOptions::default())
 }
 
 /// Run with explicit input and layout limits.
@@ -30,10 +30,17 @@ pub fn run(scope: Scope) -> Result<(), Error> {
 /// upstream registry retains its OS handlers after callback removal. A caller
 /// that continues after return must establish its subsequent signal policy.
 /// Initial scene/layout validation precedes signal registration and mode changes.
-pub fn run_with(scope: Scope, options: NativeOptions) -> Result<(), Error> {
+#[cfg_attr(
+    unix,
+    expect(
+        clippy::needless_pass_by_value,
+        reason = "the session owns the application root and disposes it on return"
+    )
+)]
+pub fn run_with(scope: Scope, options: &NativeOptions) -> Result<(), Error> {
     #[cfg(unix)]
     {
-        unix::run(scope, options)
+        unix::run(&scope, options)
     }
     #[cfg(not(unix))]
     {
@@ -46,7 +53,7 @@ pub fn run_with(scope: Scope, options: NativeOptions) -> Result<(), Error> {
 
 #[cfg(unix)]
 mod unix {
-    use super::*;
+    use super::{Error, LayoutOptions, NativeOptions, Scope};
     use crate::{
         Controller, Services,
         input::{Decoded, Decoder},
@@ -82,7 +89,7 @@ mod unix {
     const TASK: Token = Token(2);
     const BYTES_PER_TURN: usize = 256;
 
-    pub(super) fn run(scope: Scope, options: NativeOptions) -> Result<(), Error> {
+    pub(super) fn run(scope: &Scope, options: &NativeOptions) -> Result<(), Error> {
         if !io::stdin().is_terminal() || !io::stdout().is_terminal() {
             return Err(Error::terminal(
                 "interactive mode requires terminal stdin and stdout; redirected output is unsupported",
@@ -121,7 +128,7 @@ mod unix {
                 other_threads(info);
             }
         }));
-        let result = panic::catch_unwind(AssertUnwindSafe(|| run_loop(&scope, options)));
+        let result = panic::catch_unwind(AssertUnwindSafe(|| run_loop(scope, options)));
         panic::set_hook(Box::new(move |info| original(info)));
         match result {
             Ok(result) => result,
@@ -156,150 +163,233 @@ mod unix {
         }
     }
 
-    fn run_loop(scope: &Scope, options: NativeOptions) -> Result<(), Error> {
-        let terminal_path = rustix::termios::ttyname(io::stdin(), Vec::new()).io()?;
-        let input = std::fs::File::open(
-            <std::ffi::OsStr as std::os::unix::ffi::OsStrExt>::from_bytes(terminal_path.to_bytes()),
-        )
-        .io()?;
-        // An independent open description avoids setting inherited stdout
-        // nonblocking when a launcher has duplicated one terminal descriptor.
-        fcntl_setfl(&input, OFlags::NONBLOCK).io()?;
-        let mut poll = Poll::new().io()?;
-        poll.registry()
-            .register(&mut SourceFd(&input.as_raw_fd()), INPUT, Interest::READABLE)
-            .io()?;
-        let services = Services::from_owner(&scope.owner())?;
-        let wake = Arc::new(NativeWake {
-            inner: mio::Waker::new(poll.registry(), TASK).io()?,
-            failed: AtomicBool::new(false),
-        });
-        let task_waker = std::task::Waker::from(wake.clone());
-        services.register_waker(&task_waker);
-        let mut controller = Controller::new(scope.root());
-        controller.set_limits(options.max_paste_bytes, options.max_edit_bytes);
-        scope.publish();
-        services.poll_turn()?;
-        check_scene(scope)?;
-        let mut size = terminal::size().io()?;
-        // Validate the first complete layout before entering alternate screen/raw mode.
-        let focus = controller.focus();
-        layout::render(
-            &scope.root(),
-            size,
-            focus.as_ref(),
-            controller.scrolls_mut(),
-            &options.layout,
-        )?;
-        let mut signals = Signals::new().io()?;
-        poll.registry()
-            .register(
-                &mut SourceFd(&signals.read.as_raw_fd()),
-                SIGNAL,
-                Interest::READABLE,
-            )
-            .io()?;
-        let mut session = Session::default();
-        session.enter(&mut io::stdout()).io()?;
-        let mut screen = Terminal::new(CrosstermBackend::new(io::stdout())).io()?;
-        let mut decoder = Decoder::new(options.max_paste_bytes);
-        let mut events = Events::with_capacity(8);
-        let mut ready = false;
-        let mut redraw = true;
-        let mut bytes = [0; BYTES_PER_TURN];
-        'run: loop {
-            let signal_pending = signals.drain().io()?;
-            if signals.shutdown.swap(false, Ordering::AcqRel) {
-                break;
+    fn run_loop(scope: &Scope, options: &NativeOptions) -> Result<(), Error> {
+        let mut runner = Runner::start(scope, options)?;
+        runner.run()?;
+        runner.finish()
+    }
+
+    enum Reading {
+        More,
+        Drained,
+        Stop,
+    }
+
+    // Fields drop in declaration order: the screen, then the session that restores
+    // the terminal, then the signal registrations.
+    struct Runner<'a> {
+        screen: Terminal<CrosstermBackend<io::Stdout>>,
+        session: Session,
+        signals: Signals,
+        decoder: Decoder,
+        controller: Controller,
+        services: Services,
+        task_waker: std::task::Waker,
+        wake: Arc<NativeWake>,
+        events: Events,
+        poll: Poll,
+        input: std::fs::File,
+        bytes: [u8; BYTES_PER_TURN],
+        scope: &'a Scope,
+        options: &'a NativeOptions,
+        size: (u16, u16),
+        ready: bool,
+        redraw: bool,
+    }
+
+    impl<'a> Runner<'a> {
+        fn start(scope: &'a Scope, options: &'a NativeOptions) -> Result<Self, Error> {
+            let input = open_terminal_input()?;
+            let poll = Poll::new().io()?;
+            register(&poll, input.as_raw_fd(), INPUT)?;
+            let services = Services::from_owner(&scope.owner())?;
+            let wake = Arc::new(NativeWake {
+                inner: mio::Waker::new(poll.registry(), TASK).io()?,
+                failed: AtomicBool::new(false),
+            });
+            let task_waker = std::task::Waker::from(wake.clone());
+            services.register_waker(&task_waker);
+            let mut controller = Controller::new(scope.root());
+            controller.set_limits(options.max_paste_bytes, options.max_edit_bytes);
+            scope.publish();
+            services.poll_turn()?;
+            check_scene(scope)?;
+            let size = terminal::size().io()?;
+            // Validate the first complete layout before entering alternate screen/raw mode.
+            let focus = controller.focus();
+            let scrolls = controller.scrolls_mut();
+            layout::render(
+                &scope.root(),
+                size,
+                focus.as_ref(),
+                scrolls,
+                &options.layout,
+            )?;
+            let signals = Signals::new().io()?;
+            register(&poll, signals.read.as_raw_fd(), SIGNAL)?;
+            let mut session = Session::default();
+            session.enter(&mut io::stdout()).io()?;
+            Ok(Self {
+                screen: Terminal::new(CrosstermBackend::new(io::stdout())).io()?,
+                session,
+                signals,
+                decoder: Decoder::new(options.max_paste_bytes),
+                controller,
+                services,
+                task_waker,
+                wake,
+                events: Events::with_capacity(8),
+                poll,
+                input,
+                bytes: [0; BYTES_PER_TURN],
+                scope,
+                options,
+                size,
+                ready: false,
+                redraw: true,
+            })
+        }
+
+        fn run(&mut self) -> Result<(), Error> {
+            loop {
+                let signal_pending = self.signals.drain().io()?;
+                if self.signals.shutdown.swap(false, Ordering::AcqRel) {
+                    return Ok(());
+                }
+                self.apply_signals()?;
+                self.refresh()?;
+                self.decoder.expire(Instant::now());
+                if self.ready {
+                    match self.read_input()? {
+                        Reading::Stop => return Ok(()),
+                        Reading::More => continue,
+                        Reading::Drained => self.ready = false,
+                    }
+                }
+                self.wait(signal_pending)?;
             }
-            if signals.suspend.swap(false, Ordering::AcqRel) {
-                session.restore().io()?;
+        }
+
+        fn apply_signals(&mut self) -> Result<(), Error> {
+            if self.signals.suspend.swap(false, Ordering::AcqRel) {
+                self.session.restore().io()?;
                 signal_hook::low_level::raise(SIGSTOP).io()?;
-                session.enter(&mut io::stdout()).io()?;
-                screen.clear().io()?;
-                redraw = true;
+                self.session.enter(&mut io::stdout()).io()?;
+                self.screen.clear().io()?;
+                self.redraw = true;
             }
-            if signals.resize.swap(false, Ordering::AcqRel)
-                || signals.resume.swap(false, Ordering::AcqRel)
+            if self.signals.resize.swap(false, Ordering::AcqRel)
+                || self.signals.resume.swap(false, Ordering::AcqRel)
             {
-                size = terminal::size().io()?;
-                redraw = true;
+                self.size = terminal::size().io()?;
+                self.redraw = true;
             }
-            if wake.failed.load(Ordering::Acquire) {
+            Ok(())
+        }
+
+        fn refresh(&mut self) -> Result<(), Error> {
+            if self.wake.failed.load(Ordering::Acquire) {
                 return Err(Error::terminal("task notification failed"));
             }
-            services.poll_turn()?;
-            check_fault(scope)?;
-            if scope.take_dirty() || redraw {
-                draw(scope, &mut controller, &mut screen, size, &options.layout)?;
-                redraw = false;
-                check_fault(scope)?;
+            self.services.poll_turn()?;
+            check_fault(self.scope)?;
+            if self.scope.take_dirty() || self.redraw {
+                let layout = &self.options.layout;
+                draw(
+                    self.scope,
+                    &mut self.controller,
+                    &mut self.screen,
+                    self.size,
+                    layout,
+                )?;
+                self.redraw = false;
+                check_fault(self.scope)?;
             }
-            let now = Instant::now();
-            decoder.expire(now);
-            if ready {
-                match rustix::io::read(&input, &mut bytes[..]) {
-                    Ok(0) => break,
-                    Ok(count) => {
-                        for byte in &bytes[..count] {
-                            match decoder.feed(*byte, Instant::now())? {
-                                Some(Decoded::Input(input)) => {
-                                    controller.handle(input)?;
-                                    check_fault(scope)?;
-                                }
-                                Some(Decoded::Shutdown) => {
-                                    break 'run;
-                                }
-                                Some(Decoded::Suspend) => {
-                                    signals.suspend.store(true, Ordering::Release);
-                                    break;
-                                }
-                                None => {}
-                            }
-                        }
-                        // Readiness is edge-triggered. Retain it until WouldBlock,
-                        // while yielding to shutdown/resize/painting every 256 bytes.
-                        continue;
+            Ok(())
+        }
+
+        // Readiness is edge-triggered: keep reading until WouldBlock, while
+        // yielding to shutdown, resize and painting after every buffer.
+        fn read_input(&mut self) -> Result<Reading, Error> {
+            let count = match rustix::io::read(&self.input, &mut self.bytes) {
+                Ok(0) => return Ok(Reading::Stop),
+                Ok(count) => count,
+                Err(rustix::io::Errno::AGAIN) => return Ok(Reading::Drained),
+                Err(rustix::io::Errno::INTR) => return Ok(Reading::More),
+                Err(error) => return Err(io_error(&error.into())),
+            };
+            for byte in &self.bytes[..count] {
+                match self.decoder.feed(*byte, Instant::now())? {
+                    Some(Decoded::Input(input)) => {
+                        self.controller.handle(input)?;
+                        check_fault(self.scope)?;
                     }
-                    Err(rustix::io::Errno::AGAIN) => ready = false,
-                    Err(rustix::io::Errno::INTR) => continue,
-                    Err(error) => return Err(io_error(error.into())),
+                    Some(Decoded::Shutdown) => return Ok(Reading::Stop),
+                    Some(Decoded::Suspend) => {
+                        self.signals.suspend.store(true, Ordering::Release);
+                        break;
+                    }
+                    None => {}
                 }
             }
-            services.register_waker(&task_waker);
-            let timeout = if signal_pending || scope.root.0.scene.dirty.get() || services.is_ready()
-            {
+            Ok(Reading::More)
+        }
+
+        // Even a self-waking task must give newly ready keyboard and signal events
+        // a turn; polling with a zero timeout observes readiness without sleeping.
+        fn wait(&mut self, signal_pending: bool) -> Result<(), Error> {
+            self.services.register_waker(&self.task_waker);
+            let busy =
+                signal_pending || self.scope.root.0.scene.dirty.get() || self.services.is_ready();
+            let timeout = if busy {
                 Some(Duration::ZERO)
             } else {
-                [decoder.timeout(Instant::now()), services.timeout()]
-                    .into_iter()
-                    .flatten()
-                    .min()
+                [
+                    self.decoder.timeout(Instant::now()),
+                    self.services.timeout(),
+                ]
+                .into_iter()
+                .flatten()
+                .min()
             };
-            // Even a self-waking task must give newly ready keyboard/signal events
-            // a turn. Polling with zero timeout observes readiness without sleeping.
-            match poll.poll(&mut events, timeout) {
+            match self.poll.poll(&mut self.events, timeout) {
                 Ok(()) => {}
-                Err(error) if error.kind() == io::ErrorKind::Interrupted => continue,
-                Err(error) => return Err(io_error(error)),
+                Err(error) if error.kind() == io::ErrorKind::Interrupted => return Ok(()),
+                Err(error) => return Err(io_error(&error)),
             }
-            for event in &events {
-                if event.token() == INPUT {
-                    ready = true;
-                }
+            self.ready |= self.events.iter().any(|event| event.token() == INPUT);
+            Ok(())
+        }
+
+        fn finish(mut self) -> Result<(), Error> {
+            self.session.restore().io()?;
+            let omitted = self.scope.root.0.scene.omitted.get();
+            if omitted > 0 {
+                eprintln!(
+                    "Limit: {omitted} earlier reactive errors omitted (64-entry diagnostic history)"
+                );
             }
+            for error in self.scope.take_errors() {
+                eprintln!("{}", describe(&error));
+            }
+            Ok(())
         }
-        session.restore().io()?;
-        let omitted = scope.root.0.scene.omitted.get();
-        if omitted > 0 {
-            eprintln!(
-                "Limit: {omitted} earlier reactive errors omitted (64-entry diagnostic history)"
-            );
-        }
-        for error in scope.take_errors() {
-            eprintln!("{}", describe(&error));
-        }
-        Ok(())
+    }
+
+    // An independent open description avoids setting inherited stdout
+    // nonblocking when a launcher has duplicated one terminal descriptor.
+    fn open_terminal_input() -> Result<std::fs::File, Error> {
+        let path = rustix::termios::ttyname(io::stdin(), Vec::new()).io()?;
+        let path = <std::ffi::OsStr as std::os::unix::ffi::OsStrExt>::from_bytes(path.to_bytes());
+        let input = std::fs::File::open(path).io()?;
+        fcntl_setfl(&input, OFlags::NONBLOCK).io()?;
+        Ok(input)
+    }
+
+    fn register(poll: &Poll, descriptor: std::os::fd::RawFd, token: Token) -> Result<(), Error> {
+        poll.registry()
+            .register(&mut SourceFd(&descriptor), token, Interest::READABLE)
+            .io()
     }
 
     fn draw(
@@ -398,40 +488,53 @@ mod unix {
         (enabled && (rgb || indexed), enabled && rgb)
     }
 
+    #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+    enum ScreenMode {
+        Alternate,
+        HiddenCursor,
+        BracketedPaste,
+    }
+
+    impl ScreenMode {
+        fn undo(self) -> &'static [u8] {
+            match self {
+                Self::Alternate => b"\x1b[?1049l",
+                Self::HiddenCursor => b"\x1b[?25h",
+                Self::BracketedPaste => b"\x1b[?2004l",
+            }
+        }
+    }
+
+    // A mode is recorded before it is entered, so a partial entry is still undone.
     #[derive(Default)]
     struct Session {
         raw: bool,
-        alternate: bool,
-        hidden: bool,
-        paste: bool,
+        modes: std::collections::BTreeSet<ScreenMode>,
     }
 
     impl Session {
         fn enter(&mut self, output: &mut impl Write) -> io::Result<()> {
             self.raw = true;
             terminal::enable_raw_mode()?;
-            self.alternate = true;
+            self.modes.insert(ScreenMode::Alternate);
             execute!(output, EnterAlternateScreen)?;
-            self.hidden = true;
+            self.modes.insert(ScreenMode::HiddenCursor);
             execute!(output, Hide)?;
-            self.paste = true;
+            self.modes.insert(ScreenMode::BracketedPaste);
             execute!(output, EnableBracketedPaste)
         }
 
+        // Newest mode first; a mode whose undo fails stays active for the next attempt.
         fn restore(&mut self) -> io::Result<()> {
             let mut first = None;
             let mut output = io::stdout();
-            for (enabled, command) in [
-                (&mut self.paste, b"\x1b[?2004l".as_slice()),
-                (&mut self.hidden, b"\x1b[?25h".as_slice()),
-                (&mut self.alternate, b"\x1b[?1049l".as_slice()),
-            ] {
-                if *enabled {
-                    match output.write_all(command).and_then(|()| output.flush()) {
-                        Ok(()) => *enabled = false,
-                        Err(error) => {
-                            first.get_or_insert(error);
-                        }
+            for mode in self.modes.clone().into_iter().rev() {
+                match output.write_all(mode.undo()).and_then(|()| output.flush()) {
+                    Ok(()) => {
+                        self.modes.remove(&mode);
+                    }
+                    Err(error) => {
+                        first.get_or_insert(error);
                     }
                 }
             }
@@ -523,10 +626,10 @@ mod unix {
     }
     impl<T, E: Into<io::Error>> Io<T> for Result<T, E> {
         fn io(self) -> Result<T, Error> {
-            self.map_err(|error| io_error(error.into()))
+            self.map_err(|error| io_error(&error.into()))
         }
     }
-    fn io_error(error: io::Error) -> Error {
+    fn io_error(error: &io::Error) -> Error {
         Error::terminal(format!("terminal I/O: {error}"))
     }
 }

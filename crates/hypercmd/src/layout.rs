@@ -132,19 +132,12 @@ impl Presentation {
             let ancestor = &self.entries[*index];
             if ancestor.scrollable {
                 let content = ancestor.logical_content;
-                let delta = |start: i32, length: u16, lower: i32, available: u16| {
-                    if start < lower || length > available {
-                        start - lower
-                    } else {
-                        (start + i32::from(length) - lower - i32::from(available)).max(0)
-                    }
-                };
                 let next = (
                     (i32::from(ancestor.scroll.0)
-                        + delta(target.x, target.width, content.x, content.width))
+                        + scroll_delta(target.x, target.width, content.x, content.width))
                     .clamp(0, i32::from(ancestor.extent.0)) as u16,
                     (i32::from(ancestor.scroll.1)
-                        + delta(target.y, target.height, content.y, content.height))
+                        + scroll_delta(target.y, target.height, content.y, content.height))
                     .clamp(0, i32::from(ancestor.extent.1)) as u16,
                 );
                 let movement = (
@@ -244,15 +237,12 @@ pub fn render(
         depth: 0,
     };
     builder.count_node()?;
-    let style = Computed::for_node(root, None, focus, options.overrides);
+    let mut style = Computed::for_node(root, None, focus, options.overrides);
     let children = builder.children(root, &style, (true, true))?;
-    let mut root_style = style.layout.clone();
-    root_style.size = Size {
+    style.layout.size = Size {
         width: Dimension::Length(f32::from(size.0)),
         height: Dimension::Length(f32::from(size.1)),
     };
-    let mut style = style;
-    style.layout = root_style;
     let root_index = builder.push(None, style, Vec::new(), children.clone())?;
     let root_id = builder.items[root_index].layout;
     let items = &builder.items;
@@ -263,29 +253,9 @@ pub fn render(
             height: AvailableSpace::Definite(f32::from(size.1)),
         },
         |known, available, _, context, _| {
-            let Some(index) = context else {
-                return Size::ZERO;
-            };
-            let item = &items[*index];
-            let limit = known
-                .width
-                .or(match available.width {
-                    AvailableSpace::Definite(width) => Some(width),
-                    AvailableSpace::MinContent => Some(1.0),
-                    AvailableSpace::MaxContent => None,
-                })
-                .map(|width| width.max(0.0).floor() as usize);
-            let lines = text::lines(&item.text, limit);
-            Size {
-                width: known.width.unwrap_or_else(|| {
-                    lines
-                        .iter()
-                        .map(|line| line.iter().map(|glyph| glyph.width).sum::<usize>())
-                        .max()
-                        .unwrap_or_default() as f32
-                }),
-                height: known.height.unwrap_or(lines.len() as f32),
-            }
+            context.map_or(Size::ZERO, |index| {
+                measure(&items[*index].text, known, available)
+            })
         },
     )?;
     let area = Rect::new(0, 0, size.0, size.1);
@@ -294,8 +264,13 @@ pub fn render(
         entries: Vec::new(),
         viewport: area,
     };
+    let top = Placement {
+        origin: (0, 0),
+        clip: area,
+        ancestors: &[],
+    };
     for child in children {
-        builder.paint(child, (0, 0), area, &[], scrolls, &mut presentation)?;
+        builder.paint(child, &top, scrolls, &mut presentation)?;
     }
     scrolls.0.retain(|(node, _)| {
         presentation
@@ -509,120 +484,171 @@ impl Builder<'_> {
     fn paint(
         &self,
         index: usize,
-        origin: (i32, i32),
-        clip: Rect,
-        ancestors: &[usize],
+        placement: &Placement<'_>,
         scrolls: &mut ScrollState,
         presentation: &mut Presentation,
     ) -> Result<(), Error> {
         let item = &self.items[index];
-        let layout = self.tree.layout(item.layout)?;
-        let x = origin.0 + layout.location.x.round() as i32;
-        let y = origin.1 + layout.location.y.round() as i32;
-        let (width, height) = (cells(layout.size.width)?, cells(layout.size.height)?);
-        let logical = LogicalRect {
-            x,
-            y,
-            width,
-            height,
-        };
-        let rect: Rect = logical.into();
-        let left = cells(layout.padding.left)?;
-        let top = cells(layout.padding.top)?;
-        let content_width = width
-            .saturating_sub(left)
-            .saturating_sub(cells(layout.padding.right)?);
-        let content_height = height
-            .saturating_sub(top)
-            .saturating_sub(cells(layout.padding.bottom)?);
-        let logical_content = LogicalRect {
-            x: x + i32::from(left),
-            y: y + i32::from(top),
-            width: content_width,
-            height: content_height,
-        };
-        let content: Rect = logical_content.into();
-        let extent = (
-            cells(layout.content_size.width)?.saturating_sub(content_width),
-            cells(layout.content_size.height)?.saturating_sub(content_height),
-        );
+        let Boxes {
+            border,
+            content,
+            extent,
+        } = boxes(self.tree.layout(item.layout)?, placement.origin)?;
+        let rect: Rect = border.into();
         let scrolling = item.style.overflow == Overflow::Auto;
-        let mut offset = item
+        let offset = item
             .node
             .as_ref()
             .filter(|_| scrolling)
             .map_or((0, 0), |node| scrolls.offset(node));
-        offset = (offset.0.min(extent.0), offset.1.min(extent.1));
-        let mut child_ancestors = ancestors.to_vec();
+        let offset = (offset.0.min(extent.0), offset.1.min(extent.1));
+        let mut ancestors = placement.ancestors.to_vec();
         if let Some(node) = &item.node {
             if scrolling {
                 scrolls.set(node, offset);
             }
-            let index = presentation.entries.len();
+            ancestors.push(presentation.entries.len());
             presentation.entries.push(LayoutEntry {
                 node: node.clone(),
                 rect,
-                content,
-                clip,
+                content: content.into(),
+                clip: placement.clip,
                 extent,
                 scroll: offset,
                 scrollable: scrolling,
-                logical,
-                logical_content,
+                logical: border,
+                logical_content: content,
                 overflow: item.style.overflow,
-                ancestors: ancestors.to_vec(),
+                ancestors: placement.ancestors.to_vec(),
             });
-            child_ancestors.push(index);
         }
         presentation
             .buffer
-            .set_style(rect.intersection(clip), item.style.visual);
-        let content_clip = if item.style.overflow == Overflow::Visible
+            .set_style(rect.intersection(placement.clip), item.style.visual);
+        let clip = if item.style.overflow == Overflow::Visible
             && item.node.as_ref().is_none_or(|node| node.tag() != "input")
         {
-            clip
+            placement.clip
         } else {
-            clip.intersection(content)
+            placement.clip.intersection(content.into())
         };
-        let text_origin = (
-            x + i32::from(left) - i32::from(offset.0),
-            y + i32::from(top) - i32::from(offset.1),
+        let (dx, dy) = (-i32::from(offset.0), -i32::from(offset.1));
+        paint_text(
+            &mut presentation.buffer,
+            &item.text,
+            content.translated(dx, dy),
+            clip,
         );
-        for (row, line) in text::lines(&item.text, Some(usize::from(content_width)))
-            .iter()
-            .enumerate()
-        {
-            let mut column = text_origin.0;
-            let row = text_origin.1 + row as i32;
-            for glyph in line {
-                let end = column + glyph.width as i32;
-                if column >= i32::from(content_clip.left())
-                    && end <= i32::from(content_clip.right())
-                    && row >= i32::from(content_clip.top())
-                    && row < i32::from(content_clip.bottom())
-                {
-                    presentation.buffer.set_stringn(
-                        column as u16,
-                        row as u16,
-                        &glyph.text,
-                        glyph.width,
-                        glyph.style,
-                    );
-                }
-                column = end;
-            }
-        }
+        let children = Placement {
+            origin: (border.x + dx, border.y + dy),
+            clip,
+            ancestors: &ancestors,
+        };
         for child in &item.children {
-            self.paint(
-                *child,
-                (x - i32::from(offset.0), y - i32::from(offset.1)),
-                content_clip,
-                &child_ancestors,
-                scrolls,
-                presentation,
-            )?;
+            self.paint(*child, &children, scrolls, presentation)?;
         }
         Ok(())
+    }
+}
+
+struct Placement<'a> {
+    origin: (i32, i32),
+    clip: Rect,
+    ancestors: &'a [usize],
+}
+
+struct Boxes {
+    border: LogicalRect,
+    content: LogicalRect,
+    extent: (u16, u16),
+}
+
+// `extent` is how far the content overflows the content box.
+fn boxes(layout: &taffy::Layout, origin: (i32, i32)) -> Result<Boxes, Error> {
+    let x = origin.0 + layout.location.x.round() as i32;
+    let y = origin.1 + layout.location.y.round() as i32;
+    let (width, height) = (cells(layout.size.width)?, cells(layout.size.height)?);
+    let (left, top) = (cells(layout.padding.left)?, cells(layout.padding.top)?);
+    let content = LogicalRect {
+        x: x + i32::from(left),
+        y: y + i32::from(top),
+        width: width
+            .saturating_sub(left)
+            .saturating_sub(cells(layout.padding.right)?),
+        height: height
+            .saturating_sub(top)
+            .saturating_sub(cells(layout.padding.bottom)?),
+    };
+    let extent = (
+        cells(layout.content_size.width)?.saturating_sub(content.width),
+        cells(layout.content_size.height)?.saturating_sub(content.height),
+    );
+    Ok(Boxes {
+        border: LogicalRect {
+            x,
+            y,
+            width,
+            height,
+        },
+        content,
+        extent,
+    })
+}
+
+fn paint_text(buffer: &mut Buffer, runs: &[Run], area: LogicalRect, clip: Rect) {
+    let lines = text::lines(runs, Some(usize::from(area.width)));
+    for (row, line) in lines.iter().enumerate() {
+        let row = area.y + row as i32;
+        let mut column = area.x;
+        for glyph in line {
+            let end = column + glyph.width as i32;
+            let inside = column >= i32::from(clip.left())
+                && end <= i32::from(clip.right())
+                && row >= i32::from(clip.top())
+                && row < i32::from(clip.bottom());
+            if inside {
+                buffer.set_stringn(
+                    column as u16,
+                    row as u16,
+                    &glyph.text,
+                    glyph.width,
+                    glyph.style,
+                );
+            }
+            column = end;
+        }
+    }
+}
+
+// Min-content offers one cell, so every cluster wraps onto its own line.
+fn measure(runs: &[Run], known: Size<Option<f32>>, available: Size<AvailableSpace>) -> Size<f32> {
+    let limit = known
+        .width
+        .or(match available.width {
+            AvailableSpace::Definite(width) => Some(width),
+            AvailableSpace::MinContent => Some(1.0),
+            AvailableSpace::MaxContent => None,
+        })
+        .map(|width| width.max(0.0).floor() as usize);
+    let lines = text::lines(runs, limit);
+    let widest = lines
+        .iter()
+        .map(|line| line.iter().map(|glyph| glyph.width).sum::<usize>())
+        .max()
+        .unwrap_or_default();
+    Size {
+        width: known.width.unwrap_or(widest as f32),
+        height: known.height.unwrap_or(lines.len() as f32),
+    }
+}
+
+// How far a scroll offset moves to bring `[start, start + length)` into view
+// within `[lower, lower + available)`.
+fn scroll_delta(start: i32, length: u16, lower: i32, available: u16) -> i32 {
+    if start < lower || length > available {
+        start - lower
+    } else {
+        (start + i32::from(length) - lower - i32::from(available)).max(0)
     }
 }
 
@@ -737,18 +763,41 @@ fn cells(value: f32) -> Result<u16, Error> {
 #[cfg(test)]
 pub(crate) mod tests {
     use super::*;
-    use crate::ErrorKind;
+    use crate::{
+        ErrorKind, Kind, Scope, StaticNode,
+        style::{Color, Declaration, Length, Rule, Selector},
+    };
     use ratatui::style::Modifier;
+
     pub(crate) const fn el(parent: Option<usize>, tag: &'static str) -> StaticNode {
-        StaticNode {
-            parent,
-            kind: Kind::Element(tag, &[], None),
-        }
+        tagged(parent, tag, &[])
     }
     pub(crate) const fn txt(parent: usize, text: &'static str) -> StaticNode {
         StaticNode {
             parent: Some(parent),
             kind: Kind::Text(text, None),
+        }
+    }
+    const fn tagged(
+        parent: Option<usize>,
+        tag: &'static str,
+        attributes: &'static [(&'static str, &'static str)],
+    ) -> StaticNode {
+        StaticNode {
+            parent,
+            kind: Kind::Element(tag, attributes, None),
+        }
+    }
+    const fn anchored_text(parent: usize, anchor: usize) -> StaticNode {
+        StaticNode {
+            parent: Some(parent),
+            kind: Kind::Text("", Some(anchor)),
+        }
+    }
+    const fn mount(parent: Option<usize>, anchor: usize) -> StaticNode {
+        StaticNode {
+            parent,
+            kind: Kind::Mount(anchor),
         }
     }
     fn with(rule: Rule) -> LayoutOptions {
@@ -757,13 +806,20 @@ pub(crate) mod tests {
             ..Default::default()
         }
     }
-    use crate::{
-        Kind, Scope, StaticNode,
-        style::{Color, Declaration as D, Length as L, Rule, Selector as S},
-    };
+    fn cells(presentation: &Presentation, points: &[(u16, u16)]) -> Vec<String> {
+        points
+            .iter()
+            .map(|point| presentation.buffer[*point].symbol().to_owned())
+            .collect()
+    }
+    fn failure(root: &Node, size: (u16, u16), options: &LayoutOptions) -> Error {
+        let mut scroll = ScrollState::default();
+        render(root, size, None, &mut scroll, options)
+            .err()
+            .unwrap()
+    }
 
-    #[test]
-    fn inline_unicode_whitespace_and_control_text_share_measured_cells() {
+    fn unicode_scene() -> (Scope, fusor::Signal<String>) {
         let mut scope = Scope::with_styles(
             None,
             &[
@@ -775,143 +831,142 @@ pub(crate) mod tests {
                 txt(4, "B"),
                 txt(2, " C\u{1b}"),
                 el(Some(0), "pre"),
-                StaticNode {
-                    parent: Some(7),
-                    kind: Kind::Text("", Some(0)),
-                },
+                anchored_text(7, 0),
                 el(Some(0), "p"),
                 txt(9, "e"),
-                StaticNode {
-                    parent: Some(9),
-                    kind: Kind::Text("", Some(1)),
-                },
+                anchored_text(9, 1),
                 el(Some(9), "strong"),
                 txt(12, "👩"),
                 txt(9, "\u{200d}💻"),
-                StaticNode {
-                    parent: Some(0),
-                    kind: Kind::Element("p", &[("id", "wrap")], None),
-                },
+                tagged(Some(0), "p", &[("id", "wrap")]),
                 txt(15, "ab c"),
-                StaticNode {
-                    parent: Some(0),
-                    kind: Kind::Element("input", &[("placeholder", "a  bcdefghi")], None),
-                },
+                tagged(Some(0), "input", &[("placeholder", "a  bcdefghi")]),
                 el(Some(0), "p"),
                 txt(18, "tail"),
             ],
             &[
                 Rule {
-                    selector: &[S::Id("wrap")],
+                    selector: &[Selector::Id("wrap")],
                     declarations: &[
-                        D::Width(L::Cells(2.0)),
-                        D::WhiteSpace(crate::style::WhiteSpace::PreWrap),
+                        Declaration::Width(Length::Cells(2.0)),
+                        Declaration::WhiteSpace(WhiteSpace::PreWrap),
                     ],
                 },
                 Rule {
-                    selector: &[S::Tag("input")],
-                    declarations: &[D::Width(L::Cells(3.0))],
+                    selector: &[Selector::Tag("input")],
+                    declarations: &[Declaration::Width(Length::Cells(3.0))],
                 },
             ],
         )
         .unwrap();
         let value = fusor::signal(String::from("e\u{301}\t界👩\u{200d}💻"));
-        scope
-            .text(0, {
-                let value = value.clone();
-                move || value.get()
-            })
-            .unwrap();
+        let text = value.clone();
+        scope.text(0, move || text.get()).unwrap();
         scope.text(1, || "\u{301}").unwrap();
         scope.publish();
+        (scope, value)
+    }
+
+    #[test]
+    fn inline_unicode_whitespace_and_control_text_share_measured_cells() {
+        let (scope, _) = unicode_scene();
         let mut scroll = ScrollState::default();
-        let options = LayoutOptions::default();
-        let first = render(&scope.root(), (12, 8), None, &mut scroll, &options).unwrap();
+        let first = render(
+            &scope.root(),
+            (12, 8),
+            None,
+            &mut scroll,
+            &Default::default(),
+        )
+        .unwrap();
+        // Row by row: collapsed spaces and a replaced control character, a tab
+        // and wide graphemes, a grapheme split across runs, wrapped pre-wrap text,
+        // a placeholder whose spaces are preserved and which clips, then the tail.
+        let points = [
+            (0, 0),
+            (2, 0),
+            (5, 0),
+            (0, 1),
+            (4, 1),
+            (6, 1),
+            (0, 2),
+            (1, 2),
+        ];
+        let expected = [
+            "A",
+            "B",
+            "�",
+            "e\u{301}",
+            "界",
+            "👩\u{200d}💻",
+            "e\u{301}",
+            "👩\u{200d}💻",
+        ];
+        assert_eq!(cells(&first, &points), expected);
+        let points = [
+            (0, 3),
+            (1, 3),
+            (0, 4),
+            (1, 4),
+            (0, 5),
+            (2, 5),
+            (3, 5),
+            (0, 6),
+        ];
         assert_eq!(
-            (
-                first.buffer[(0, 0)].symbol(),
-                first.buffer[(2, 0)].symbol(),
-                first.buffer[(5, 0)].symbol()
-            ),
-            ("A", "B", "�")
+            cells(&first, &points),
+            ["a", "b", " ", "c", "a", " ", " ", "t"]
         );
         assert!(first.buffer[(2, 0)].modifier.contains(Modifier::BOLD));
-        assert_eq!(
-            (
-                first.buffer[(0, 1)].symbol(),
-                first.buffer[(4, 1)].symbol(),
-                first.buffer[(6, 1)].symbol()
-            ),
-            ("e\u{301}", "界", "👩\u{200d}💻")
-        );
-        assert_eq!(first.buffer[(0, 2)].symbol(), "e\u{301}");
-        assert_eq!(first.buffer[(1, 2)].symbol(), "👩\u{200d}💻");
         assert!(
             first.buffer[(1, 2)].modifier.contains(Modifier::BOLD),
             "a cross-run grapheme uses the style where it starts"
         );
-        assert_eq!(first.buffer[(0, 3)].symbol(), "a");
-        assert_eq!(first.buffer[(1, 3)].symbol(), "b");
-        assert_eq!(first.buffer[(0, 4)].symbol(), " ");
-        assert_eq!(first.buffer[(1, 4)].symbol(), "c");
-        assert_eq!(first.buffer[(0, 5)].symbol(), "a");
-        assert_eq!(
-            first.buffer[(2, 5)].symbol(),
-            " ",
-            "editor spaces are preserved"
-        );
-        assert_eq!(
-            first.buffer[(3, 5)].symbol(),
-            " ",
-            "input text clips horizontally"
-        );
-        assert_eq!(first.buffer[(0, 6)].symbol(), "t");
         assert!(
             first.buffer.content[7 * 12..]
                 .iter()
                 .all(|cell| cell.symbol() == " "),
             "a narrow input must not wrap over following content"
         );
-        value.set("ab".into());
-        let next = render(&scope.root(), (12, 4), None, &mut scroll, &options).unwrap();
-        assert_eq!(
-            (
-                next.buffer[(0, 1)].symbol(),
-                next.buffer[(6, 1)].symbol(),
-                next.buffer[(7, 1)].symbol()
-            ),
-            ("a", " ", " ")
-        );
-        assert!(
-            render(&scope.root(), (0, 0), None, &mut scroll, &options)
-                .unwrap()
-                .buffer
-                .content
-                .is_empty()
-        );
     }
 
     #[test]
-    fn scroll_reveal_resize_and_scoped_cascade_are_observable() {
-        static SHEET: &[Rule] = &[
-            Rule {
-                selector: &[S::Tag("main")],
-                declarations: &[D::Height(L::Percent(1.0)), D::Overflow(Overflow::Auto)],
-            },
-            Rule {
-                selector: &[S::Tag("button")],
-                declarations: &[
-                    D::Height(L::Cells(1.0)),
-                    D::Width(L::Percent(1.0)),
-                    D::Foreground(Color::Red),
-                ],
-            },
-            Rule {
-                selector: &[S::Id("last")],
-                declarations: &[D::Foreground(Color::Blue)],
-            },
-        ];
-        let mut scope = Scope::with_styles(
+    fn text_updates_rerender_and_an_empty_viewport_paints_nothing() {
+        let (scope, value) = unicode_scene();
+        let mut scroll = ScrollState::default();
+        let options = LayoutOptions::default();
+        render(&scope.root(), (12, 8), None, &mut scroll, &options).unwrap();
+        value.set("ab".into());
+        let next = render(&scope.root(), (12, 4), None, &mut scroll, &options).unwrap();
+        assert_eq!(cells(&next, &[(0, 1), (6, 1), (7, 1)]), ["a", " ", " "]);
+        let empty = render(&scope.root(), (0, 0), None, &mut scroll, &options).unwrap();
+        assert!(empty.buffer.content.is_empty());
+    }
+
+    static SCROLL_SHEET: &[Rule] = &[
+        Rule {
+            selector: &[Selector::Tag("main")],
+            declarations: &[
+                Declaration::Height(Length::Percent(1.0)),
+                Declaration::Overflow(Overflow::Auto),
+            ],
+        },
+        Rule {
+            selector: &[Selector::Tag("button")],
+            declarations: &[
+                Declaration::Height(Length::Cells(1.0)),
+                Declaration::Width(Length::Percent(1.0)),
+                Declaration::Foreground(Color::Red),
+            ],
+        },
+        Rule {
+            selector: &[Selector::Id("last")],
+            declarations: &[Declaration::Foreground(Color::Blue)],
+        },
+    ];
+
+    fn scroll_scene() -> (Scope, Node) {
+        let scope = Scope::with_styles(
             None,
             &[
                 el(None, "main"),
@@ -919,30 +974,30 @@ pub(crate) mod tests {
                 txt(1, "one"),
                 el(Some(0), "button"),
                 txt(3, "two"),
-                StaticNode {
-                    parent: Some(0),
-                    kind: Kind::Element("button", &[("id", "last")], None),
-                },
+                tagged(Some(0), "button", &[("id", "last")]),
                 txt(5, "界三"),
-                StaticNode {
-                    parent: Some(0),
-                    kind: Kind::Mount(0),
-                },
+                mount(Some(0), 0),
             ],
-            SHEET,
+            SCROLL_SHEET,
         )
         .unwrap();
         scope.publish();
+        let last = scope.root().find("last").unwrap();
+        (scope, last)
+    }
+
+    #[test]
+    fn revealing_a_control_keeps_its_logical_geometry_until_resize() {
+        let (scope, last) = scroll_scene();
         let root = scope.root();
-        let last = root.find("last").unwrap();
         let mut scroll = ScrollState::default();
         let options = LayoutOptions::default();
         let first = render(&root, (8, 2), None, &mut scroll, &options).unwrap();
-        assert_eq!(first.buffer[(0, 0)].symbol(), " ");
-        assert_eq!(first.buffer[(1, 0)].symbol(), "o");
-        assert_eq!(first.buffer[(1, 0)].bg, Color::Reset);
-        assert!(first.buffer[(1, 0)].modifier.contains(Modifier::BOLD));
-        assert!(!first.buffer[(1, 0)].modifier.contains(Modifier::REVERSED));
+        assert_eq!(cells(&first, &[(0, 0), (1, 0)]), [" ", "o"]);
+        let label = &first.buffer[(1, 0)];
+        assert_eq!(label.bg, Color::Reset);
+        assert!(label.modifier.contains(Modifier::BOLD));
+        assert!(!label.modifier.contains(Modifier::REVERSED));
         assert!(first.can_focus(&last));
         let geometry = first.focus_geometry(&last);
         scroll.reveal(&last, &first);
@@ -952,13 +1007,7 @@ pub(crate) mod tests {
             geometry,
             "manual scroll does not change logical focus geometry"
         );
-        assert_eq!(
-            (
-                revealed.buffer[(1, 0)].symbol(),
-                revealed.buffer[(1, 1)].symbol()
-            ),
-            ("t", "界")
-        );
+        assert_eq!(cells(&revealed, &[(1, 0), (1, 1)]), ["t", "界"]);
         assert_eq!(revealed.buffer[(0, 1)].fg, Color::Blue);
         assert!(
             revealed.buffer[(0, 1)]
@@ -972,69 +1021,61 @@ pub(crate) mod tests {
             geometry,
             "resize changes clipping geometry"
         );
-        let hidden = render(
-            &root,
-            (8, 1),
-            None,
-            &mut scroll,
-            &with(Rule {
-                selector: &[S::Tag("main")],
-                declarations: &[D::Overflow(Overflow::Hidden)],
-            }),
-        )
-        .unwrap();
+    }
+
+    #[test]
+    fn hidden_overflow_and_the_viewport_bound_what_can_be_focused() {
+        let (scope, last) = scroll_scene();
+        let root = scope.root();
+        let mut scroll = ScrollState::default();
+        let hidden = with(Rule {
+            selector: &[Selector::Tag("main")],
+            declarations: &[Declaration::Overflow(Overflow::Hidden)],
+        });
+        let hidden = render(&root, (8, 1), None, &mut scroll, &hidden).unwrap();
         assert!(
             !hidden.can_focus(&last),
             "hidden overflow cannot expose the last control"
         );
-        let mut viewport_clipped = render(
-            &root,
-            (8, 1),
-            None,
-            &mut scroll,
-            &with(Rule {
-                selector: &[S::Tag("main")],
-                declarations: &[D::Overflow(Overflow::Visible)],
-            }),
-        )
-        .unwrap();
+        let visible = with(Rule {
+            selector: &[Selector::Tag("main")],
+            declarations: &[Declaration::Overflow(Overflow::Visible)],
+        });
+        let mut clipped = render(&root, (8, 1), None, &mut scroll, &visible).unwrap();
         assert!(
-            !viewport_clipped.can_focus(&last),
+            !clipped.can_focus(&last),
             "viewport clipping also excludes an unreachable control"
         );
-        viewport_clipped.buffer.resize(Rect::new(0, 0, 8, 4));
+        clipped.buffer.resize(Rect::new(0, 0, 8, 4));
         assert!(
-            !viewport_clipped.can_focus(&last),
+            !clipped.can_focus(&last),
             "an output-only diagnostic area does not extend the content viewport"
         );
-        let overridden = render(
-            &root,
-            (8, 4),
-            None,
-            &mut scroll,
-            &with(Rule {
-                selector: &[S::Tag("button")],
-                declarations: &[D::Foreground(Color::Green)],
-            }),
-        )
-        .unwrap();
+    }
+
+    #[test]
+    fn application_overrides_apply_and_library_styles_stay_scoped() {
+        let (mut scope, _) = scroll_scene();
+        let root = scope.root();
+        let mut scroll = ScrollState::default();
+        let green = with(Rule {
+            selector: &[Selector::Tag("button")],
+            declarations: &[Declaration::Foreground(Color::Green)],
+        });
+        let overridden = render(&root, (8, 4), None, &mut scroll, &green).unwrap();
         assert_eq!(overridden.buffer[(0, 2)].fg, Color::Green);
-        scope
-            .children(
-                0,
-                crate::Children::new(|owner| {
-                    Scope::with_styles(
-                        Some(owner),
-                        &[el(None, "button"), txt(0, "library")],
-                        &[Rule {
-                            selector: &[S::Tag("button")],
-                            declarations: &[D::Foreground(Color::Yellow)],
-                        }],
-                    )
-                }),
+        let library = crate::Children::new(|owner| {
+            Scope::with_styles(
+                Some(owner),
+                &[el(None, "button"), txt(0, "library")],
+                &[Rule {
+                    selector: &[Selector::Tag("button")],
+                    declarations: &[Declaration::Foreground(Color::Yellow)],
+                }],
             )
-            .unwrap();
-        let scoped = render(&root, (8, 4), None, &mut scroll, &options).unwrap();
+        });
+        scope.children(0, &library).unwrap();
+        let scoped = render(&root, (8, 4), None, &mut scroll, &Default::default()).unwrap();
         assert_eq!(
             (scoped.buffer[(0, 0)].fg, scoped.buffer[(0, 3)].fg),
             (Color::Red, Color::Yellow)
@@ -1042,36 +1083,26 @@ pub(crate) mod tests {
     }
 
     #[test]
-    fn indefinite_percentages_and_limits_fail_before_presentation() {
+    fn indefinite_percentages_and_oversized_viewports_fail_before_presentation() {
         let scope = Scope::with_styles(
             None,
             &[el(None, "main"), el(Some(0), "p"), txt(1, "bounded")],
             &[Rule {
-                selector: &[S::Tag("p")],
-                declarations: &[D::Height(L::Percent(0.5))],
+                selector: &[Selector::Tag("p")],
+                declarations: &[Declaration::Height(Length::Percent(0.5))],
             }],
         )
         .unwrap();
         scope.publish();
-        let root = scope.root();
-        let mut scroll = ScrollState::default();
-        assert!(
-            render(&root, (8, 4), None, &mut scroll, &LayoutOptions::default())
-                .err()
-                .unwrap()
-                .message
-                .contains("definite parent")
-        );
-        let error = render(
-            &root,
-            (u16::MAX, u16::MAX),
-            None,
-            &mut scroll,
-            &LayoutOptions::default(),
-        )
-        .err()
-        .unwrap();
-        assert_eq!(error.kind, ErrorKind::Limit);
+        let options = LayoutOptions::default();
+        let percentage = failure(&scope.root(), (8, 4), &options);
+        assert!(percentage.message.contains("definite parent"));
+        let oversized = failure(&scope.root(), (u16::MAX, u16::MAX), &options);
+        assert_eq!(oversized.kind, ErrorKind::Limit);
+    }
+
+    #[test]
+    fn nested_inline_nodes_consume_the_budget_and_reject_geometry() {
         let inline = Scope::with_styles(
             None,
             &[
@@ -1081,75 +1112,39 @@ pub(crate) mod tests {
                 txt(2, "nested"),
             ],
             &[Rule {
-                selector: &[S::Tag("strong")],
-                declarations: &[D::Width(L::Cells(1.0))],
+                selector: &[Selector::Tag("strong")],
+                declarations: &[Declaration::Width(Length::Cells(1.0))],
             }],
         )
         .unwrap();
         inline.publish();
-        let limit = render(
-            &inline.root(),
-            (8, 4),
-            None,
-            &mut scroll,
-            &LayoutOptions {
-                max_nodes: 2,
-                ..LayoutOptions::default()
-            },
-        )
-        .err()
-        .unwrap();
+        let budget = LayoutOptions {
+            max_nodes: 2,
+            ..LayoutOptions::default()
+        };
         assert_eq!(
-            limit.kind,
+            failure(&inline.root(), (8, 4), &budget).kind,
             ErrorKind::Limit,
             "nested inline nodes consume the render budget"
         );
-        let unsupported = render(
-            &inline.root(),
-            (8, 4),
-            None,
-            &mut scroll,
-            &LayoutOptions::default(),
-        )
-        .err()
-        .unwrap();
+        let unsupported = failure(&inline.root(), (8, 4), &LayoutOptions::default());
         assert!(unsupported.message.contains("surrounding container"));
+    }
+
+    #[test]
+    fn structural_only_trees_consume_the_visit_budget() {
         let structure = Scope::new(
             None,
-            &[
-                StaticNode {
-                    parent: None,
-                    kind: Kind::Mount(0),
-                },
-                StaticNode {
-                    parent: Some(0),
-                    kind: Kind::Mount(1),
-                },
-                StaticNode {
-                    parent: Some(1),
-                    kind: Kind::Mount(2),
-                },
-            ],
+            &[mount(None, 0), mount(Some(0), 1), mount(Some(1), 2)],
         )
         .unwrap();
         structure.publish();
-        let limit = render(
-            &structure.root(),
-            (8, 4),
-            None,
-            &mut scroll,
-            &LayoutOptions {
-                max_nodes: 1,
-                ..LayoutOptions::default()
-            },
-        )
-        .err()
-        .unwrap();
-        assert_eq!(
-            limit.kind,
-            ErrorKind::Limit,
-            "structural-only trees consume the visit budget"
-        );
+        let budget = LayoutOptions {
+            max_nodes: 1,
+            ..LayoutOptions::default()
+        };
+        let limit = failure(&structure.root(), (8, 4), &budget);
+        assert_eq!(limit.kind, ErrorKind::Limit);
     }
 
     #[test]
@@ -1157,45 +1152,38 @@ pub(crate) mod tests {
         let scope = Scope::with_styles(
             None,
             &[
-                StaticNode {
-                    parent: None,
-                    kind: Kind::Element("main", &[("id", "outer")], None),
-                },
-                StaticNode {
-                    parent: Some(0),
-                    kind: Kind::Element("section", &[("id", "inner")], None),
-                },
+                tagged(None, "main", &[("id", "outer")]),
+                tagged(Some(0), "section", &[("id", "inner")]),
                 el(Some(1), "button"),
                 txt(2, "one"),
                 el(Some(1), "button"),
                 txt(4, "two"),
-                StaticNode {
-                    parent: Some(1),
-                    kind: Kind::Element("button", &[("id", "target")], None),
-                },
+                tagged(Some(1), "button", &[("id", "target")]),
                 txt(6, "three"),
                 el(Some(0), "p"),
                 txt(8, "tail"),
             ],
             &[
                 Rule {
-                    selector: &[S::Tag("main")],
-                    declarations: &[D::Height(L::Percent(1.0)), D::Overflow(Overflow::Auto)],
+                    selector: &[Selector::Tag("main")],
+                    declarations: &[
+                        Declaration::Height(Length::Percent(1.0)),
+                        Declaration::Overflow(Overflow::Auto),
+                    ],
                 },
                 Rule {
-                    selector: &[S::Tag("section")],
-                    declarations: &[D::Height(L::Cells(2.0)), D::Overflow(Overflow::Auto)],
+                    selector: &[Selector::Tag("section")],
+                    declarations: &[
+                        Declaration::Height(Length::Cells(2.0)),
+                        Declaration::Overflow(Overflow::Auto),
+                    ],
                 },
             ],
         )
         .unwrap();
         scope.publish();
         let root = scope.root();
-        let (outer, inner, target) = (
-            root.find("outer").unwrap(),
-            root.find("inner").unwrap(),
-            root.find("target").unwrap(),
-        );
+        let [outer, inner, target] = ["outer", "inner", "target"].map(|id| root.find(id).unwrap());
         let mut scroll = ScrollState::default();
         let options = LayoutOptions::default();
         let first = render(&root, (8, 2), None, &mut scroll, &options).unwrap();
@@ -1210,17 +1198,11 @@ pub(crate) mod tests {
         let revealed = render(&root, (8, 2), Some(&target), &mut scroll, &options).unwrap();
         assert_eq!(scroll.offset(&inner), (0, 1));
         assert_eq!(revealed.buffer[(1, 0)].symbol(), "t");
-        let hidden = render(
-            &root,
-            (8, 2),
-            None,
-            &mut scroll,
-            &with(Rule {
-                selector: &[S::Tag("section")],
-                declarations: &[D::Overflow(Overflow::Hidden)],
-            }),
-        )
-        .unwrap();
+        let hidden = with(Rule {
+            selector: &[Selector::Tag("section")],
+            declarations: &[Declaration::Overflow(Overflow::Hidden)],
+        });
+        let hidden = render(&root, (8, 2), None, &mut scroll, &hidden).unwrap();
         assert!(!hidden.can_focus(&target));
     }
 }

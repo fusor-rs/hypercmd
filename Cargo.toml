@@ -12,6 +12,27 @@ repository = "https://github.com/fusor-rs/hypercmd"
 
 [workspace.lints.rust]
 unsafe_code = "forbid"
+unused = { level = "deny", priority = -1 }
+
+[workspace.lints.clippy]
+all = { level = "deny", priority = -1 }
+allow_attributes = "deny"
+allow_attributes_without_reason = "deny"
+dbg_macro = "deny"
+todo = "deny"
+unimplemented = "deny"
+unwrap_used = "deny"
+redundant_clone = "deny"
+needless_pass_by_value = "deny"
+too_many_lines = "deny"
+cognitive_complexity = "deny"
+wildcard_imports = "deny"
+min_ident_chars = "deny"
+match_same_arms = "deny"
+branches_sharing_code = "deny"
+fn_params_excessive_bools = "deny"
+struct_excessive_bools = "deny"
+excessive_nesting = "deny"
 
 [workspace.dependencies]
 hypercmd = { path = "crates/hypercmd", version = "=0.1.0", default-features = false }

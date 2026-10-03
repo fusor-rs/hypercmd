@@ -1,8 +1,8 @@
 use fusor::{FromInputs, OwnerHandle, Registration, Signal, signal};
 use fusor_async::{Resource, Spawner};
 use fusor_router::{AppUrl, view::Navigation};
-use fusor_test::{ControlledLoader, TestExecutor};
-use hypercmd::{Controller, Error, ErrorKind, History, Scope};
+use fusor_test::{ControlledLoader, PendingRequest, TestExecutor};
+use hypercmd::{Controller, Error, ErrorKind, History, Node, Scope};
 use std::{
     cell::{Cell, RefCell},
     rc::Rc,
@@ -97,6 +97,37 @@ fusor::template!(backend = "hypercmd", "ui/routing.html");
 // rollback, nested identity, or cancellation when a callback leaves its own screen.
 #[test]
 fn contract() {
+    let mut routing = mount_routing();
+    let member = enter_member(&mut routing);
+    same_route_keeps_identity(&mut routing, &member);
+    let before = rejected_navigation_rolls_back(&mut routing, &member);
+    abandoned_stage_retires(&mut routing, &member, &before);
+    let team = leaving_cancels_work(&mut routing, member);
+    history_traversal(&routing, &team, &before);
+    redirect_moves_focus(&mut routing);
+    disposal(&routing);
+}
+
+struct RoutingHarness {
+    controls: Controller,
+    root: Node,
+    history: History,
+    scope: Scope,
+    navigation: Rc<RefCell<Option<Navigation<Scope>>>>,
+    visible: Signal<bool>,
+    cleanups: Rc<Cell<usize>>,
+    loader: ControlledLoader<String, (), String>,
+    executor: TestExecutor,
+}
+
+struct MemberScreen {
+    team: Node,
+    member: Node,
+    counter: Node,
+    first_request: PendingRequest<String, (), String>,
+}
+
+fn mount_routing() -> RoutingHarness {
     let executor = TestExecutor::new();
     let loader = ControlledLoader::new();
     let cleanups = Rc::new(Cell::new(0));
@@ -118,8 +149,29 @@ fn contract() {
     let mut controls = Controller::new(root.clone());
     super::draw(&scope, &mut controls);
     assert_eq!(controls.focus(), root.find("home"));
+    RoutingHarness {
+        controls,
+        root,
+        history,
+        scope,
+        navigation,
+        visible,
+        cleanups,
+        loader,
+        executor,
+    }
+}
+
+fn enter_member(routing: &mut RoutingHarness) -> MemberScreen {
+    let RoutingHarness {
+        controls,
+        root,
+        history,
+        scope,
+        ..
+    } = routing;
     history.push("/teams/alpha/members/1").unwrap();
-    super::draw(&scope, &mut controls);
+    super::draw(scope, controls);
     assert_eq!(controls.focus(), root.find("team-counter"));
     let team = root.find("team").unwrap();
     root.find("team-counter")
@@ -130,41 +182,76 @@ fn contract() {
     let counter = root.find("member-counter").unwrap();
     counter.dispatch("click").unwrap();
     controls.set_focus(&counter).unwrap();
-    executor.run_until_stalled();
-    let first_request = loader.next_request().unwrap();
+    routing.executor.run_until_stalled();
+    let first_request = routing.loader.next_request().unwrap();
     assert_eq!(first_request.key, "1");
+    MemberScreen {
+        team,
+        member,
+        counter,
+        first_request,
+    }
+}
 
+fn same_route_keeps_identity(routing: &mut RoutingHarness, screen: &MemberScreen) {
+    let RoutingHarness {
+        controls,
+        root,
+        history,
+        scope,
+        ..
+    } = routing;
     history
         .push("/teams/alpha/members/1?q=one#details")
         .unwrap();
-    super::draw(&scope, &mut controls);
-    assert_eq!(root.find("team"), Some(team.clone()));
-    assert_eq!(root.find("member"), Some(member.clone()));
-    assert_eq!(controls.focus(), Some(counter.clone()));
-    assert!(counter.text().contains("1"));
+    super::draw(scope, controls);
+    assert_eq!(root.find("team"), Some(screen.team.clone()));
+    assert_eq!(root.find("member"), Some(screen.member.clone()));
+    assert_eq!(controls.focus(), Some(screen.counter.clone()));
+    assert!(screen.counter.text().contains("1"));
     assert_eq!(
         history.location().unwrap().query_first("q").as_deref(),
         Some("one")
     );
+}
 
+fn rejected_navigation_rolls_back(routing: &mut RoutingHarness, screen: &MemberScreen) -> AppUrl {
+    let RoutingHarness {
+        controls,
+        root,
+        history,
+        scope,
+        ..
+    } = routing;
     let before = history.location().unwrap();
     assert!(history.push("/teams/alpha/members/broken").is_err());
     assert!(history.push("/%zz").is_err());
-    super::draw(&scope, &mut controls);
+    super::draw(scope, controls);
     assert_eq!(history.location().unwrap(), before);
-    assert_eq!(root.find("member"), Some(member.clone()));
-    assert_eq!(controls.focus(), Some(counter.clone()));
-    assert!(!first_request.is_cancelled());
+    assert_eq!(root.find("member"), Some(screen.member.clone()));
+    assert_eq!(controls.focus(), Some(screen.counter.clone()));
+    assert!(!screen.first_request.is_cancelled());
+    before
+}
 
-    // Stage through the supported API without changing the terminal history.
+// Stage through the supported API without changing the terminal history.
+fn abandoned_stage_retires(routing: &mut RoutingHarness, screen: &MemberScreen, before: &AppUrl) {
+    let RoutingHarness {
+        controls,
+        root,
+        history,
+        navigation,
+        cleanups,
+        ..
+    } = routing;
     let outlet = root.find("routing").unwrap();
     let navigation = navigation.borrow().as_ref().unwrap().clone();
     let stage = navigation
         .prepare_navigation(&AppUrl::parse("/teams/alpha/members/2").unwrap())
         .unwrap();
     let before_cleanup = cleanups.get();
-    assert_eq!(history.location().unwrap(), before);
-    let frame = super::frame(&root, &mut controls, (80, 40));
+    assert_eq!(&history.location().unwrap(), before);
+    let frame = super::frame(root, controls, (80, 40));
     let painted: String = frame
         .buffer
         .content
@@ -181,38 +268,53 @@ fn contract() {
         before_cleanup + 1,
         "abandoned destination retires once"
     );
-    assert_eq!(root.find("member"), Some(member.clone()));
-    assert!(!first_request.is_cancelled());
+    assert_eq!(root.find("member"), Some(screen.member.clone()));
+    assert!(!screen.first_request.is_cancelled());
     assert!(outlet.is_alive());
+}
 
+fn leaving_cancels_work(routing: &mut RoutingHarness, screen: MemberScreen) -> Node {
+    let RoutingHarness {
+        controls,
+        root,
+        history,
+        scope,
+        loader,
+        executor,
+        ..
+    } = routing;
     history.push("/teams/alpha/members/2").unwrap();
     executor.run_until_stalled();
-    assert!(first_request.is_cancelled());
-    assert!(first_request.complete(Ok(())).is_err());
-    assert_eq!(root.find("team"), Some(team.clone()));
+    assert!(screen.first_request.is_cancelled());
+    assert!(screen.first_request.complete(Ok(())).is_err());
+    assert_eq!(root.find("team"), Some(screen.team.clone()));
     assert_eq!(root.find("team-counter").unwrap().text(), "alpha 1");
-    assert_ne!(root.find("member"), Some(member));
-    super::draw(&scope, &mut controls);
+    assert_ne!(root.find("member"), Some(screen.member));
+    super::draw(scope, controls);
     assert_eq!(controls.focus(), root.find("member-counter"));
     let second_request = loader.next_request().unwrap();
     let stale = root.find("leave").unwrap();
     controls.set_focus(&stale).unwrap();
-    super::key(&mut controls, hypercmd::Key::Enter, false);
+    super::key(controls, hypercmd::Key::Enter, false);
     assert!(!stale.is_alive());
-    super::draw(&scope, &mut controls);
+    super::draw(scope, controls);
     assert_eq!(controls.focus(), root.find("home"));
     stale.dispatch("click").unwrap();
     assert!(second_request.is_cancelled());
     executor.run_until_stalled();
     assert!(second_request.complete(Ok(())).is_err());
+    screen.team
+}
 
+fn history_traversal(routing: &RoutingHarness, team: &Node, before: &AppUrl) {
+    let RoutingHarness { root, history, .. } = routing;
     history.back().unwrap();
     assert_eq!(history.location().unwrap().path, "/teams/alpha/members/2");
     history.back().unwrap();
-    assert_eq!(history.location().unwrap(), before);
+    assert_eq!(&history.location().unwrap(), before);
     history.forward().unwrap();
     history.push("/teams/beta/members/reentrant").unwrap();
-    assert_ne!(root.find("team"), Some(team));
+    assert_ne!(root.find("team"), Some(team.clone()));
     history.forward().unwrap();
     assert_eq!(
         history.location().unwrap().path,
@@ -222,17 +324,37 @@ fn contract() {
     assert!(root.find("missing").is_some());
     history.back().unwrap();
     assert_eq!(history.location().unwrap().path, "/teams/alpha/members/2");
+}
 
+fn redirect_moves_focus(routing: &mut RoutingHarness) {
+    let RoutingHarness {
+        controls,
+        root,
+        history,
+        scope,
+        ..
+    } = routing;
     history.push("/redirect").unwrap();
-    super::draw(&scope, &mut controls);
+    super::draw(scope, controls);
     assert_eq!(history.location().unwrap().path, "/teams/gamma/members/3");
-    super::draw(&scope, &mut controls);
+    super::draw(scope, controls);
     assert_eq!(
         controls.focus(),
         root.find("team-counter"),
         "focus navigation waits for the destination layout"
     );
+}
 
+fn disposal(routing: &RoutingHarness) {
+    let RoutingHarness {
+        history,
+        scope,
+        visible,
+        cleanups,
+        loader,
+        executor,
+        ..
+    } = routing;
     visible.set(false);
     assert!(history.back().is_err());
     assert!(history.forward().is_err());

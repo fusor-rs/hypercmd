@@ -1,5 +1,5 @@
 use fusor::{Signal, signal};
-use hypercmd_job_controls::{Job, JobRow};
+use hypercmd_job_controls::Job;
 use std::rc::Rc;
 use wasm_bindgen::JsValue;
 
@@ -31,4 +31,14 @@ impl App {
     }
 }
 
-fusor::template!("web/index.html");
+#[expect(
+    clippy::too_many_lines,
+    clippy::excessive_nesting,
+    clippy::redundant_clone,
+    reason = "fusor-build 0.1.4's DOM codegen leaves these unsuppressed in generated mount code"
+)]
+mod dom {
+    use super::App;
+    use hypercmd_job_controls::JobRow;
+    fusor::template!("web/index.html");
+}

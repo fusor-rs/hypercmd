@@ -3,7 +3,7 @@
 See [application startup](../README.md#author-an-application) for mounting and
 running a root. Disabling `native` keeps scene, controls and layout without OS I/O.
 
-`run_with(scope, NativeOptions)` configures the required resource bounds:
+`run_with(scope, &NativeOptions)` configures the required resource bounds:
 
 - `max_paste_bytes`: 64 KiB by default, enforced while raw paste bytes arrive.
 - `max_edit_bytes`: 1 MiB by default, enforced by the control editor.

@@ -3,7 +3,11 @@ use crate::{
     layout::{Presentation, ScrollState},
     text,
 };
-use ratatui::{layout::Position, style::Modifier};
+use ratatui::{
+    buffer::Buffer,
+    layout::{Position, Rect},
+    style::Modifier,
+};
 use unicode_segmentation::UnicodeSegmentation;
 
 pub(crate) const PASTE_LIMIT: usize = 64 * 1024;
@@ -128,16 +132,13 @@ impl Controller {
                     || old.focus_geometry(focus) != presentation.focus_geometry(focus)
             })
         });
-        self.presentation = Some(presentation);
-        self.order = self
-            .presentation
-            .as_ref()
-            .unwrap()
+        self.order = presentation
             .entries
             .iter()
             .filter(|entry| entry.node.is_control())
             .map(|entry| entry.node.clone())
             .collect();
+        self.presentation = Some(presentation);
         let destination = self.root.0.scene.route_focus.take().upgrade().map(Node);
         let retained = self.focus.as_ref().is_some_and(|node| self.focusable(node));
         if !retained {
@@ -152,10 +153,8 @@ impl Controller {
                 self.reconcile(&previous)?;
             }
         }
-        if geometry_changed {
-            if let (Some(focus), Some(presentation)) = (&self.focus, &self.presentation) {
-                self.scrolls.reveal(focus, presentation);
-            }
+        if let Some(focus) = self.focus.clone().filter(|_| geometry_changed) {
+            self.reveal(&focus);
         }
         Ok(())
     }
@@ -168,7 +167,7 @@ impl Controller {
             && self
                 .presentation
                 .as_ref()
-                .is_some_and(|p| p.can_focus(node))
+                .is_some_and(|presentation| presentation.can_focus(node))
     }
     fn tabbable(&self, node: &Node) -> bool {
         self.focusable(node)
@@ -178,14 +177,20 @@ impl Controller {
     fn tab_order(&self) -> Vec<Node> {
         self.presentation
             .as_ref()
-            .map(|p| {
-                p.entries
+            .map(|presentation| {
+                presentation
+                    .entries
                     .iter()
                     .filter(|entry| self.tabbable(&entry.node))
                     .map(|entry| entry.node.clone())
                     .collect()
             })
             .unwrap_or_default()
+    }
+    fn reveal(&mut self, node: &Node) {
+        if let Some(presentation) = &self.presentation {
+            self.scrolls.reveal(node, presentation);
+        }
     }
     fn reconcile(&mut self, previous: &[Node]) -> Result<(), Error> {
         if self.focus.as_ref().is_some_and(|node| self.focusable(node)) {
@@ -199,7 +204,7 @@ impl Controller {
     }
     fn replacement(&self, focus: Option<&Node>, previous: &[Node]) -> Option<Node> {
         let from = focus.and_then(|focus| previous.iter().position(|node| node == focus));
-        neighbor(previous, from, true, false, |node| self.tabbable(node))
+        nearest(previous, from, |node| self.tabbable(node))
             .or_else(|| self.tab_order().first().cloned())
     }
     pub fn set_focus(&mut self, node: &Node) -> Result<(), Error> {
@@ -224,9 +229,7 @@ impl Controller {
                 self.focus = Some(target.clone());
                 target.dispatch("focus")?;
                 if self.focusable(&target) {
-                    if let Some(presentation) = &self.presentation {
-                        self.scrolls.reveal(&target, presentation);
-                    }
+                    self.reveal(&target);
                     return Ok(());
                 }
             }
@@ -245,8 +248,9 @@ impl Controller {
             return Ok(());
         }
         let control = if let Some(id) = label.attribute("for") {
-            self.presentation.as_ref().and_then(|p| {
-                p.entries
+            self.presentation.as_ref().and_then(|presentation| {
+                presentation
+                    .entries
                     .iter()
                     .find(|entry| {
                         entry.node.tag() == "input"
@@ -304,9 +308,7 @@ impl Controller {
             .focus
             .as_ref()
             .and_then(|focus| self.order.iter().position(|node| node == focus));
-        let next = neighbor(&self.order, current, !reverse, true, |node| {
-            self.tabbable(node)
-        });
+        let next = cycle(&self.order, current, !reverse, |node| self.tabbable(node));
         self.change_focus(next)
     }
     fn vertical(&mut self, up: bool) -> Result<(), Error> {
@@ -343,23 +345,26 @@ impl Controller {
         }
         Ok(())
     }
+    fn page_viewport_containing(&mut self, node: &Node, up: bool) {
+        let Some(entry) = self.presentation.as_ref().and_then(|presentation| {
+            presentation
+                .entries
+                .iter()
+                .rev()
+                .find(|entry| entry.scrollable && contains(&entry.node, node))
+        }) else {
+            return;
+        };
+        let rows = i32::from(entry.content.height.max(1));
+        self.scrolls
+            .scroll(&entry.node, 0, if up { -rows } else { rows });
+    }
     fn key(&mut self, key: Key, shift: bool, kind: KeyKind) -> Result<(), Error> {
         let Some(node) = self.focus.clone().filter(Node::is_interactive) else {
             return Ok(());
         };
         if matches!(key, Key::PageUp | Key::PageDown) {
-            if let Some(p) = &self.presentation {
-                if let Some(entry) = p
-                    .entries
-                    .iter()
-                    .rev()
-                    .find(|entry| entry.scrollable && contains(&entry.node, &node))
-                {
-                    let delta = i32::from(entry.content.height.max(1))
-                        * if key == Key::PageUp { -1 } else { 1 };
-                    self.scrolls.scroll(&entry.node, 0, delta);
-                }
-            }
+            self.page_viewport_containing(&node, key == Key::PageUp);
         } else if node.tag() == "button" {
             if kind == KeyKind::Press && matches!(key, Key::Enter | Key::Char(' ')) {
                 activate(&node)?;
@@ -511,37 +516,46 @@ impl Controller {
         if cursor >= editor.scroll + usize::from(rect.width) {
             editor.scroll = cursor + 1 - usize::from(rect.width);
         }
-        let selection = editor.selection();
-        for x in rect.x..rect.right() {
-            if let Some(cell) = presentation.buffer.cell_mut((x, rect.y)) {
-                cell.set_symbol(" ");
-            }
-        }
-        let mut column = 0;
         let displayed = node.display_value();
-        for (byte, grapheme) in displayed.grapheme_indices(true) {
-            let safe = text::sanitize(grapheme, false);
-            let width = text::width(&safe);
-            let end = column + width;
-            if column >= editor.scroll
-                && end <= editor.scroll + usize::from(rect.width)
-                && width > 0
-            {
-                let x = rect.x + (column - editor.scroll) as u16;
-                if let Some(cell) = presentation.buffer.cell_mut((x, rect.y)) {
-                    cell.set_symbol(&safe);
-                    if selection.contains(&byte) {
-                        cell.modifier.toggle(Modifier::REVERSED);
-                    }
-                }
-            }
-            column = end;
-        }
-        let x = rect.x + (cursor - editor.scroll) as u16;
-        if let Some(cell) = presentation.buffer.cell_mut((x, rect.y)) {
-            cell.modifier.toggle(Modifier::UNDERLINED);
-        }
+        paint_draft(&mut presentation.buffer, rect, &displayed, &editor, cursor);
         node.0.editor.replace(editor);
+    }
+}
+
+fn paint_draft(
+    buffer: &mut Buffer,
+    rect: Rect,
+    displayed: &str,
+    editor: &EditorState,
+    cursor: usize,
+) {
+    let selection = editor.selection();
+    for x in rect.x..rect.right() {
+        if let Some(cell) = buffer.cell_mut((x, rect.y)) {
+            cell.set_symbol(" ");
+        }
+    }
+    let mut column = 0;
+    for (byte, grapheme) in displayed.grapheme_indices(true) {
+        let safe = text::sanitize(grapheme, false);
+        let width = text::width(&safe);
+        let start = column;
+        column += width;
+        let visible = width > 0
+            && start >= editor.scroll
+            && column <= editor.scroll + usize::from(rect.width);
+        let x = rect.x + start.saturating_sub(editor.scroll) as u16;
+        let Some(cell) = visible.then(|| buffer.cell_mut((x, rect.y))).flatten() else {
+            continue;
+        };
+        cell.set_symbol(&safe);
+        if selection.contains(&byte) {
+            cell.modifier.toggle(Modifier::REVERSED);
+        }
+    }
+    let x = rect.x + (cursor - editor.scroll) as u16;
+    if let Some(cell) = buffer.cell_mut((x, rect.y)) {
+        cell.modifier.toggle(Modifier::UNDERLINED);
     }
 }
 
@@ -560,31 +574,34 @@ fn activate(node: &Node) -> Result<(), Error> {
         Ok(())
     }
 }
-fn neighbor(
+// Tab order: the next eligible node in one direction, wrapping past either end.
+fn cycle(
     list: &[Node],
     from: Option<usize>,
     forward: bool,
-    wrap: bool,
     eligible: impl Fn(&Node) -> bool,
 ) -> Option<Node> {
-    let find = |range: std::ops::Range<usize>, forward: bool| {
-        let mut nodes = list[range].iter();
-        if forward {
-            nodes.find(|node| eligible(node))
-        } else {
-            nodes.rev().find(|node| eligible(node))
-        }
-        .cloned()
+    let (before, after) = from.map_or((&[][..], &[][..]), |index| {
+        (&list[..index], &list[index + 1..])
+    });
+    let found = if forward {
+        after.iter().chain(list).find(|node| eligible(node))
+    } else {
+        before
+            .iter()
+            .rev()
+            .chain(list.iter().rev())
+            .find(|node| eligible(node))
     };
-    let all = 0..list.len();
-    match (from, wrap) {
-        (None, false) => None,
-        (None, true) => find(all, forward),
-        (Some(index), true) if forward => {
-            find(index + 1..list.len(), true).or_else(|| find(all, true))
-        }
-        (Some(index), true) => find(0..index, false).or_else(|| find(all, false)),
-        // Without wrapping, prefer the nearest following node, then the nearest preceding one.
-        (Some(index), false) => find(index + 1..list.len(), true).or_else(|| find(0..index, false)),
-    }
+    found.cloned()
+}
+
+// A replacement for a removed focus: the nearest following node, then the nearest preceding one.
+fn nearest(list: &[Node], from: Option<usize>, eligible: impl Fn(&Node) -> bool) -> Option<Node> {
+    let index = from?;
+    list[index + 1..]
+        .iter()
+        .find(|node| eligible(node))
+        .or_else(|| list[..index].iter().rev().find(|node| eligible(node)))
+        .cloned()
 }

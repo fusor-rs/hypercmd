@@ -165,7 +165,7 @@ fn worker_read<T: Send + 'static>(
             let workers = workers.clone();
             async move {
                 workers
-                    .worker(cancel, move |cancel| read(&path, &cancel))
+                    .worker(&cancel, move |cancel| read(&path, &cancel))
                     .map_err(|error| error.to_string())?
                     .await
                     .map_err(|error| error.to_string())?

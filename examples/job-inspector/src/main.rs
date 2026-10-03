@@ -14,36 +14,22 @@ struct Inspector {
 }
 
 impl Inspector {
-    fn new(owner: OwnerHandle) -> Result<Self, Error> {
+    fn new(owner: &OwnerHandle) -> Result<Self, Error> {
         let jobs = signal(
             (1..=24)
                 .map(|id| Job::new(id, (id * 7) % 100))
                 .collect::<Vec<_>>(),
         );
-        let services = Services::from_owner(&owner)?;
+        let services = Services::from_owner(owner)?;
         let (progress, clock) = (jobs.clone(), services.clone());
         let notice = signal(String::new());
         let report = notice.clone();
-        services.spawn(&owner, async move {
-            let result = async {
-                while progress
-                    .with(|jobs| jobs.iter().any(|job| !job.cancelled && job.progress < 100))
-                {
-                    clock.sleep(Duration::from_millis(500))?.await?;
-                    progress.update(|jobs| {
-                        for job in jobs.iter_mut().filter(|job| !job.cancelled) {
-                            job.progress = (job.progress + 2).min(100);
-                        }
-                    });
-                }
-                Ok::<_, Error>(())
-            }
-            .await;
-            if let Err(error) = result {
+        services.spawn(owner, async move {
+            if let Err(error) = advance_jobs(progress, clock).await {
                 report.set(error.to_string());
             }
         })?;
-        let navigate = History::install(&owner, "/")?;
+        let navigate = History::install(owner, "/")?;
         let report = notice.clone();
         let inspect = Rc::new(move |id| {
             if let Err(error) = navigate.push(&format!("/jobs/{id}")) {
@@ -104,28 +90,14 @@ impl FromInputs for JobDetails {
             &owner,
             move || key.get(),
             move |_, _cancel| {
-                let clock = clock.clone();
-                let jobs = jobs.clone();
+                let (clock, jobs) = (clock.clone(), jobs.clone());
                 let fail = fail.replace(false);
                 async move {
-                    clock
-                        .sleep(Duration::from_millis(600))
-                        .map_err(|e| e.to_string())?
-                        .await
-                        .map_err(|e| e.to_string())?;
+                    pause(&clock, REPORT_DELAY).await?;
                     if fail {
                         return Err("Simulated read failure. Retry to load the report.".into());
                     }
-                    let job = jobs.with_untracked(|jobs| find(jobs, id).cloned());
-                    job.map(|job| {
-                        let status = if job.cancelled {
-                            "cancelled"
-                        } else {
-                            "working"
-                        };
-                        format!("{} · {}% · {status}", job.name, job.progress)
-                    })
-                    .ok_or_else(|| "This job was removed.".to_owned())
+                    describe(&jobs, id)
                 }
             },
             services.spawner(),
@@ -162,6 +134,39 @@ impl JobDetails {
 
 fn find(jobs: &[Job], id: u32) -> Option<&Job> {
     jobs.iter().find(|job| job.id == id)
+}
+
+const PROGRESS_TICK: Duration = Duration::from_millis(500);
+const PROGRESS_STEP: u32 = 2;
+const REPORT_DELAY: Duration = Duration::from_millis(600);
+
+async fn advance_jobs(jobs: Signal<Vec<Job>>, clock: Services) -> Result<(), Error> {
+    while jobs.with(|jobs| jobs.iter().any(|job| !job.cancelled && job.progress < 100)) {
+        clock.sleep(PROGRESS_TICK)?.await?;
+        jobs.update(|jobs| {
+            for job in jobs.iter_mut().filter(|job| !job.cancelled) {
+                job.progress = (job.progress + PROGRESS_STEP).min(100);
+            }
+        });
+    }
+    Ok(())
+}
+
+async fn pause(clock: &Services, delay: Duration) -> Result<(), String> {
+    let sleep = clock.sleep(delay).map_err(|error| error.to_string())?;
+    sleep.await.map_err(|error| error.to_string())
+}
+
+fn describe(jobs: &Signal<Vec<Job>>, id: u32) -> Result<String, String> {
+    let job = jobs
+        .with_untracked(|jobs| find(jobs, id).cloned())
+        .ok_or("This job was removed.")?;
+    let status = if job.cancelled {
+        "cancelled"
+    } else {
+        "working"
+    };
+    Ok(format!("{} · {}% · {status}", job.name, job.progress))
 }
 
 fusor::template!(backend = "hypercmd", "ui/app.html");

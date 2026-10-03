@@ -226,7 +226,7 @@ impl Services {
     /// Cancellation cannot undo writes or forcibly stop arbitrary worker code.
     pub fn worker<T: Send + 'static>(
         &self,
-        cancel: CancellationToken,
+        cancel: &CancellationToken,
         work: impl FnOnce(Arc<AtomicBool>) -> T + Send + 'static,
     ) -> Result<Worker<T>, Error> {
         self.check_live()?;
@@ -252,19 +252,8 @@ impl Services {
                 MANAGED_WORKER.with(|managed| managed.set(true));
                 let result =
                     panic::catch_unwind(AssertUnwindSafe(|| work(thread_slot.cancel.clone())))
-                        .map_err(|payload| {
-                            let message =
-                                WORKER_PANIC.with(|text| text.take()).unwrap_or_else(|| {
-                                    payload
-                                        .downcast_ref::<String>()
-                                        .cloned()
-                                        .or_else(|| {
-                                            payload.downcast_ref::<&str>().map(|s| (*s).to_owned())
-                                        })
-                                        .unwrap_or_else(|| "worker panicked".into())
-                                });
-                            Error::service(message)
-                        });
+                        .map_err(|payload| Error::service(panic_message(payload.as_ref())));
+                // The receiver is gone when the request was cancelled first.
                 let _ = send.send(result);
             })
             .map_err(|error| Error::service(format!("cannot start worker: {error}")))?;
@@ -483,6 +472,20 @@ pub(crate) fn capture_worker_panic(info: &panic::PanicHookInfo<'_>) -> bool {
         true
     })
 }
+// The native panic hook records the full report; other hosts only have the payload.
+fn panic_message(payload: &(dyn std::any::Any + Send)) -> String {
+    WORKER_PANIC.with(|text| text.take()).unwrap_or_else(|| {
+        payload
+            .downcast_ref::<String>()
+            .cloned()
+            .or_else(|| {
+                payload
+                    .downcast_ref::<&str>()
+                    .map(|text| (*text).to_owned())
+            })
+            .unwrap_or_else(|| "worker panicked".into())
+    })
+}
 
 #[cfg(test)]
 mod tests {
@@ -500,17 +503,11 @@ mod tests {
         let services = Services::from_owner(&scope.owner()).unwrap();
         let polls = Rc::new(Cell::new(0));
         let wake = Rc::new(RefCell::new(None));
-        let dropped = Rc::new(Cell::new(false));
-        struct Dropped(Rc<Cell<bool>>);
-        impl Drop for Dropped {
-            fn drop(&mut self) {
-                self.0.set(true);
-            }
-        }
-        let (observed, stored, guard) = (polls.clone(), wake.clone(), Dropped(dropped.clone()));
+        let task_alive = Rc::new(());
+        let (observed, stored, held) = (polls.clone(), wake.clone(), task_alive.clone());
         services
             .spawn(&scope.owner(), async move {
-                let _guard = guard;
+                let _held = held;
                 poll_fn(move |context| {
                     observed.set(observed.get() + 1);
                     stored.replace(Some(context.waker().clone()));
@@ -536,7 +533,11 @@ mod tests {
         assert_eq!(polls.get(), 2);
         scope.dispose();
         services.poll_turn().unwrap();
-        assert!(dropped.get());
+        assert_eq!(
+            Rc::strong_count(&task_alive),
+            1,
+            "disposal dropped the task"
+        );
         wake.borrow().as_ref().unwrap().wake_by_ref();
         services.poll_turn().unwrap();
         assert_eq!(polls.get(), 2, "disposed child task was polled again");
@@ -658,7 +659,7 @@ mod tests {
         let (release, wait) = std::sync::mpsc::sync_channel(0);
         let (report, observed) = std::sync::mpsc::sync_channel(1);
         let worker = services
-            .worker(source.token(), move |cancel| {
+            .worker(&source.token(), move |cancel| {
                 wait.recv().unwrap();
                 report.send(cancel.load(Ordering::Acquire)).unwrap();
                 7
@@ -676,7 +677,7 @@ mod tests {
         assert!(finished.get(), "cancellation did not wake the waiter");
         assert!(
             services
-                .worker(CancellationToken::default(), |_| ())
+                .worker(&CancellationToken::default(), |_| ())
                 .is_err()
         );
         release.send(()).unwrap();

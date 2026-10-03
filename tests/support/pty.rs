@@ -1,4 +1,3 @@
-#![allow(dead_code)]
 use portable_pty::{Child, CommandBuilder, MasterPty, PtySize, native_pty_system};
 use std::{
     io::{Read, Write},
@@ -30,13 +29,19 @@ impl Terminal {
                 cols,
                 ..Default::default()
             })
-            .unwrap();
-        let original = pair.master.get_termios().unwrap();
+            .expect("open a pseudo-terminal");
+        let original = pair.master.get_termios().expect("read the initial termios");
         command.env("TERM", "xterm-256color");
-        let child = pair.slave.spawn_command(command).unwrap();
+        let child = pair
+            .slave
+            .spawn_command(command)
+            .expect("spawn the PTY child");
         drop(pair.slave);
-        let writer = pair.master.take_writer().unwrap();
-        let mut reader = pair.master.try_clone_reader().unwrap();
+        let writer = pair.master.take_writer().expect("take the PTY writer");
+        let mut reader = pair
+            .master
+            .try_clone_reader()
+            .expect("clone the PTY reader");
         let (sender, receiver) = sync_channel(8);
         std::thread::spawn(move || {
             let mut bytes = [0; 4096];
@@ -52,7 +57,9 @@ impl Terminal {
             writer,
             receiver,
             transcript: Vec::new(),
-            termios: Box::new(move |master| original == master.get_termios().unwrap()),
+            termios: Box::new(move |master| {
+                original == master.get_termios().expect("read the current termios")
+            }),
         }
     }
     fn record(&mut self, bytes: Vec<u8>) {
@@ -70,8 +77,8 @@ impl Terminal {
     pub fn send(&mut self, bytes: &[u8]) -> usize {
         self.drain();
         let start = self.transcript.len();
-        self.writer.write_all(bytes).unwrap();
-        self.writer.flush().unwrap();
+        self.writer.write_all(bytes).expect("write to the PTY");
+        self.writer.flush().expect("flush the PTY");
         start
     }
     pub fn expect(&mut self, bytes: &[u8], text: &str) {
@@ -100,7 +107,7 @@ impl Terminal {
         let deadline = Instant::now() + Duration::from_secs(5);
         loop {
             self.drain();
-            if let Some(status) = self.child.try_wait().unwrap() {
+            if let Some(status) = self.child.try_wait().expect("poll the PTY child") {
                 while let Ok(bytes) = self.receiver.recv_timeout(Duration::from_millis(30)) {
                     self.record(bytes);
                 }
@@ -134,25 +141,6 @@ impl Terminal {
         {
             self.wait_for(0, reset);
         }
-    }
-    pub fn signal(&self, signal: &str) {
-        assert!(
-            std::process::Command::new("kill")
-                .args([signal, &self.child.process_id().unwrap().to_string()])
-                .status()
-                .unwrap()
-                .success()
-        );
-    }
-    pub fn assert_quiet(&mut self) {
-        std::thread::sleep(Duration::from_millis(80));
-        self.drain();
-        assert!(
-            self.receiver
-                .recv_timeout(Duration::from_millis(180))
-                .is_err(),
-            "settled app emitted idle output"
-        );
     }
 }
 pub fn find(bytes: &[u8], needle: &[u8]) -> Option<usize> {

@@ -16,7 +16,7 @@ struct AppState {
 }
 
 impl AppState {
-    fn new(owner: OwnerHandle) -> Self {
+    fn new(owner: &OwnerHandle) -> Self {
         assert!(!owner.is_active());
         let message = signal(String::new());
         let written = message.clone();
@@ -196,16 +196,26 @@ fn app_contract() {
     assert_eq!(increment.text(), "Count 6");
 }
 
-#[test]
-fn components_contract() {
+struct PanelHarness {
+    scope: hypercmd::Scope,
+    root: Node,
+    jobs: Signal<Vec<Job>>,
+    visible: Signal<bool>,
+    message: Signal<Option<String>>,
+    pulse: Signal<u32>,
+    probes: Probes,
+    number: Signal<i32>,
+    selection: Signal<Vec<String>>,
+    audit: Signal<u32>,
+    observed: Rc<RefCell<Vec<i32>>>,
+}
+
+fn mount_panel() -> PanelHarness {
     let jobs = signal(vec![job(1, "First"), job(2, "Second")]);
-    let visible = signal(true);
-    let message = signal(Some("ready".to_owned()));
-    let pulse = signal(0);
-    let probes = Probes::default();
-    let number = signal(3);
+    let (visible, message) = (signal(true), signal(Some("ready".to_owned())));
+    let (pulse, number, audit) = (signal(0), signal(3), signal(0));
     let selection = signal(Vec::<String>::new());
-    let audit = signal(0);
+    let probes = Probes::default();
     let observed = Rc::new(RefCell::new(Vec::new()));
     let scope = hypercmd::mount::<Panel>(PanelInputs {
         title: "Jobs".into(),
@@ -220,9 +230,42 @@ fn components_contract() {
         observed: observed.clone(),
     })
     .unwrap();
-    let root = scope.root();
+    PanelHarness {
+        root: scope.root(),
+        scope,
+        jobs,
+        visible,
+        message,
+        pulse,
+        probes,
+        number,
+        selection,
+        audit,
+        observed,
+    }
+}
+
+// The rows captured before a keyed reorder, and their order after it.
+struct Rows {
+    before: Vec<Node>,
+    first_counter: Node,
+    after: Vec<Node>,
+}
+
+#[test]
+fn components_contract() {
+    let panel = mount_panel();
+    projection_and_branches(&panel);
+    bindings_and_batches(&panel);
+    let rows = keyed_reorder(&panel);
+    rejected_row_updates(&panel, &rows);
+    removal_and_disposal(&panel, &rows);
+}
+
+fn projection_and_branches(panel: &PanelHarness) {
+    let root = &panel.root;
     assert_eq!(
-        probes.effects.get(),
+        panel.probes.effects.get(),
         2,
         "ordinary child effects run before publication"
     );
@@ -230,27 +273,30 @@ fn components_contract() {
     assert!(root.text().contains("Jobs:0:First"));
     let payload = root.find("payload").unwrap();
     assert_eq!(payload.text(), "Jobs:ready");
-    scope.publish();
+    panel.scope.publish();
     root.find("increment").unwrap().dispatch("click").unwrap();
     assert_eq!(root.find("increment").unwrap().text(), "1");
-    message.set(Some("updated".into()));
+    panel.message.set(Some("updated".into()));
     assert_eq!(root.find("payload").unwrap(), payload);
     assert_eq!(payload.text(), "Jobs:updated");
-    message.set(None);
+    panel.message.set(None);
     assert!(root.find("absent").is_some());
-    visible.set(false);
+    panel.visible.set(false);
     assert!(root.find("absent").is_none());
+}
 
+fn bindings_and_batches(panel: &PanelHarness) {
     let schedule = Rc::new(RefCell::new(Vec::new()));
     let _ordering = {
-        let (number, audit, schedule) = (number.clone(), audit.clone(), schedule.clone());
+        let (number, audit, schedule) =
+            (panel.number.clone(), panel.audit.clone(), schedule.clone());
         effect(move || schedule.borrow_mut().push((number.get(), audit.get())))
     };
     schedule.borrow_mut().clear();
-    let input = root.find("number").unwrap();
+    let input = panel.root.find("number").unwrap();
     input.edit("12").unwrap();
     assert_eq!(
-        *observed.borrow(),
+        *panel.observed.borrow(),
         [12],
         "bind runs before authored handler"
     );
@@ -260,42 +306,44 @@ fn components_contract() {
         "each listener owns one batch"
     );
     input.edit("012").unwrap();
-    pulse.set(1);
+    panel.pulse.set(1);
     assert_eq!(
         input.value(),
         "012",
         "equivalent draft survives unrelated updates"
     );
     input.edit("-").unwrap();
-    assert_eq!(number.get(), 12);
+    assert_eq!(panel.number.get(), 12);
     assert_eq!(input.value(), "-");
-    let calls = observed.borrow().len();
-    number.set(20);
+    let calls = panel.observed.borrow().len();
+    panel.number.set(20);
     assert_eq!(input.value(), "20");
     assert_eq!(
-        observed.borrow().len(),
+        panel.observed.borrow().len(),
         calls,
         "model writes do not synthesize input"
     );
-    let member = root.find("member").unwrap();
+    let member = panel.root.find("member").unwrap();
     member.check(true).unwrap();
-    assert_eq!(selection.get(), ["batch"]);
-    selection.set(vec![]);
+    assert_eq!(panel.selection.get(), ["batch"]);
+    panel.selection.set(vec![]);
     assert!(!member.checked());
+}
 
-    let before = elements(&root, "li");
+fn keyed_reorder(panel: &PanelHarness) -> Rows {
+    let before = elements(&panel.root, "li");
     let first_counter = before[0].find("row-count").unwrap();
     let row_editor = before[0].find("row-draft").unwrap();
-    let mut controls = Controller::new(root.clone());
-    draw(&scope, &mut controls);
+    let mut controls = Controller::new(panel.root.clone());
+    draw(&panel.scope, &mut controls);
     controls.set_focus(&row_editor).unwrap();
     key(&mut controls, Key::End, false);
     key(&mut controls, Key::Left, true);
     let editor_before = row_editor.editor();
     first_counter.dispatch("click").unwrap();
-    jobs.set(vec![job(2, "Second"), job(1, "First")]);
-    let after = elements(&root, "li");
-    draw(&scope, &mut controls);
+    panel.jobs.set(vec![job(2, "Second"), job(1, "First")]);
+    let after = elements(&panel.root, "li");
+    draw(&panel.scope, &mut controls);
     assert_eq!(controls.focus(), Some(row_editor.clone()));
     assert_eq!(
         row_editor.editor(),
@@ -310,31 +358,41 @@ fn components_contract() {
     );
     assert!(after[0].text().contains("Jobs:0:Second"));
     assert_eq!(
-        probes.effects.get(),
+        panel.probes.effects.get(),
         4,
         "row factories did not subscribe to constructor reads"
     );
-
-    jobs.set(vec![job(2, "Duplicate"), job(2, "Second")]);
-    assert_eq!(
-        elements(&root, "li"),
+    Rows {
+        before,
+        first_counter,
         after,
+    }
+}
+
+fn rejected_row_updates(panel: &PanelHarness, rows: &Rows) {
+    panel.jobs.set(vec![job(2, "Duplicate"), job(2, "Second")]);
+    assert_eq!(
+        elements(&panel.root, "li"),
+        rows.after,
         "duplicate keys preserve committed rows"
     );
-    assert_eq!(scope.take_errors()[0].kind, ErrorKind::DuplicateKey);
-    assert_eq!(first_counter.text(), "First:1");
-    jobs.set(vec![job(2, "Second"), job(3, "")]);
+    assert_eq!(panel.scope.take_errors()[0].kind, ErrorKind::DuplicateKey);
+    assert_eq!(rows.first_counter.text(), "First:1");
+    panel.jobs.set(vec![job(2, "Second"), job(3, "")]);
     assert_eq!(
-        elements(&root, "li"),
-        after,
+        elements(&panel.root, "li"),
+        rows.after,
         "failed new constructor preserves committed rows"
     );
-    assert_eq!(scope.take_errors()[0].kind, ErrorKind::Construction);
-    jobs.set(vec![job(2, "Second"), job(1, "First")]);
+    assert_eq!(panel.scope.take_errors()[0].kind, ErrorKind::Construction);
+    panel.jobs.set(vec![job(2, "Second"), job(1, "First")]);
+}
 
-    let remove = before[0].find("row-remove").unwrap();
+fn removal_and_disposal(panel: &PanelHarness, rows: &Rows) {
+    let probes = &panel.probes;
+    let remove = rows.before[0].find("row-remove").unwrap();
     remove.dispatch("click").unwrap();
-    assert_eq!(jobs.get(), [job(2, "Second")]);
+    assert_eq!(panel.jobs.get(), [job(2, "Second")]);
     assert_eq!(
         probes.cleanups.get(),
         1,
@@ -347,27 +405,27 @@ fn components_contract() {
     );
     assert!(!remove.is_alive());
     remove.dispatch("click").unwrap();
-    first_counter.dispatch("click").unwrap();
+    rows.first_counter.dispatch("click").unwrap();
     assert_eq!(probes.cleanups.get(), 1);
-    jobs.set(vec![job(2, "Second"), job(1, "Returned")]);
-    let returned = elements(&root, "li")[1].find("row-count").unwrap();
-    assert_ne!(returned, first_counter);
-    first_counter.dispatch("click").unwrap();
+    panel.jobs.set(vec![job(2, "Second"), job(1, "Returned")]);
+    let returned = elements(&panel.root, "li")[1].find("row-count").unwrap();
+    assert_ne!(returned, rows.first_counter);
+    rows.first_counter.dispatch("click").unwrap();
     assert_eq!(
         returned.text(),
         "Returned:0",
         "stale handles cannot reach replacement rows"
     );
-    scope.dispose();
+    panel.scope.dispose();
     assert_eq!(probes.cleanups.get(), 3);
     let effects = probes.effects.get();
-    pulse.set(2);
+    panel.pulse.set(2);
     assert_eq!(
         probes.effects.get(),
         effects,
         "disposal releases constructor subscriptions"
     );
-    assert!(scope.take_errors().is_empty());
+    assert!(panel.scope.take_errors().is_empty());
 }
 
 #[test]
@@ -428,13 +486,23 @@ fn key(controls: &mut Controller, key: Key, shift: bool) {
         .unwrap();
 }
 
-#[test]
-fn controls_contract() {
+struct ControlsHarness {
+    scope: hypercmd::Scope,
+    root: Node,
+    controls: Controller,
+    draft: TextField<String>,
+    duplicate: Signal<bool>,
+    visible: Signal<bool>,
+    disabled: Signal<bool>,
+    remove_on_focus: Signal<bool>,
+    clicks: Signal<u32>,
+    blurred: Signal<bool>,
+}
+
+fn mount_controls() -> ControlsHarness {
     let draft = TextField::new(String::new());
     let (duplicate, visible, disabled) = (signal(false), signal(true), signal(true));
-    let remove_on_focus = signal(false);
-    let clicks = signal(0);
-    let blurred = signal(false);
+    let (remove_on_focus, clicks, blurred) = (signal(false), signal(0), signal(false));
     let scope = hypercmd::mount::<Controls>(ControlsInputs {
         draft: draft.clone(),
         remove_on_focus: remove_on_focus.clone(),
@@ -449,34 +517,69 @@ fn controls_contract() {
     let root = scope.root();
     let mut controls = Controller::new(root.clone());
     draw(&scope, &mut controls);
+    ControlsHarness {
+        scope,
+        root,
+        controls,
+        draft,
+        duplicate,
+        visible,
+        disabled,
+        remove_on_focus,
+        clicks,
+        blurred,
+    }
+}
+
+fn input_origin(frame: &hypercmd::layout::Presentation, input: &Node) -> (u16, u16) {
+    let entry = frame.entries.iter().find(|entry| entry.node == *input);
+    let content = entry.unwrap().content;
+    (content.x, content.y)
+}
+
+#[test]
+fn controls_contract() {
+    let mut harness = mount_controls();
+    activation_and_vertical_focus(&mut harness);
+    placeholder_and_cluster_edits(&mut harness);
+    selection_and_paste_limits(&mut harness);
+    tab_and_label_focus(&mut harness);
+    structural_focus_changes(&mut harness);
+    scrolling_reveals_focus(&mut harness);
+}
+
+fn activation_and_vertical_focus(harness: &mut ControlsHarness) {
+    let (root, controls) = (&harness.root, &mut harness.controls);
     assert_eq!(controls.focus(), root.find("activate"));
     for kind in [KeyKind::Press, KeyKind::Repeat, KeyKind::Release] {
-        controls
-            .handle(Input::Key {
-                key: Key::Enter,
-                shift: false,
-                kind,
-            })
-            .unwrap();
+        let enter = Input::Key {
+            key: Key::Enter,
+            shift: false,
+            kind,
+        };
+        controls.handle(enter).unwrap();
     }
     assert_eq!(
-        clicks.get(),
+        harness.clicks.get(),
         1,
         "distinguishable repeats/releases do not activate buttons"
     );
-    key(&mut controls, Key::Up, false);
-    controls
-        .handle(Input::Key {
-            key: Key::Down,
-            shift: false,
-            kind: KeyKind::Release,
-        })
-        .unwrap();
+    key(controls, Key::Up, false);
+    let release = Input::Key {
+        key: Key::Down,
+        shift: false,
+        kind: KeyKind::Release,
+    };
+    controls.handle(release).unwrap();
     assert_eq!(controls.focus(), root.find("activate"));
-    key(&mut controls, Key::Down, false);
+    key(controls, Key::Down, false);
     assert_eq!(controls.focus(), root.find("draft"));
-    key(&mut controls, Key::Up, false);
+    key(controls, Key::Up, false);
     assert_eq!(controls.focus(), root.find("activate"));
+}
+
+fn placeholder_and_cluster_edits(harness: &mut ControlsHarness) {
+    let (root, controls) = (&harness.root, &mut harness.controls);
     controls
         .focus_label(&root.find("draft-label").unwrap())
         .unwrap();
@@ -486,15 +589,10 @@ fn controls_contract() {
         Some(input.clone()),
         "labels resolve IDs across structural scopes"
     );
-    let frame = frame(&root, &mut controls, (80, 40));
-    let rect = frame
-        .entries
-        .iter()
-        .find(|entry| entry.node == input)
-        .unwrap()
-        .content;
-    let cursor = frame.buffer.cell((rect.x, rect.y)).unwrap();
-    let next = frame.buffer.cell((rect.x + 1, rect.y)).unwrap();
+    let frame = frame(root, controls, (80, 40));
+    let (x, y) = input_origin(&frame, &input);
+    let cursor = frame.buffer.cell((x, y)).unwrap();
+    let next = frame.buffer.cell((x + 1, y)).unwrap();
     assert_eq!(
         cursor.symbol(),
         "T",
@@ -504,29 +602,32 @@ fn controls_contract() {
         cursor.modifier, next.modifier,
         "placeholder preserves a distinct cursor"
     );
-    assert!(draft.raw().is_empty(), "placeholder is never an edit");
+    assert!(
+        harness.draft.raw().is_empty(),
+        "placeholder is never an edit"
+    );
     controls
         .handle(Input::Paste("e\u{301}界👩‍🚀".into()))
         .unwrap();
-    key(&mut controls, Key::End, false);
-    key(&mut controls, Key::Backspace, false);
+    key(controls, Key::End, false);
+    key(controls, Key::Backspace, false);
     assert_eq!(
-        draft.raw(),
+        harness.draft.raw(),
         "e\u{301}界",
         "backspace removes a whole emoji ZWJ cluster"
     );
-    key(&mut controls, Key::Left, true);
-    key(&mut controls, Key::Left, true);
-    let frame = self::frame(&root, &mut controls, (80, 40));
-    let rect = frame
-        .entries
-        .iter()
-        .find(|entry| entry.node == input)
-        .unwrap()
-        .content;
-    let cursor = frame.buffer.cell((rect.x, rect.y)).unwrap();
-    let selected = frame.buffer.cell((rect.x + 1, rect.y)).unwrap();
-    let unselected = frame.buffer.cell((rect.x + 3, rect.y)).unwrap();
+}
+
+fn selection_and_paste_limits(harness: &mut ControlsHarness) {
+    let (root, controls, draft) = (&harness.root, &mut harness.controls, &harness.draft);
+    let input = root.find("draft").unwrap();
+    key(controls, Key::Left, true);
+    key(controls, Key::Left, true);
+    let frame = frame(root, controls, (80, 40));
+    let (x, y) = input_origin(&frame, &input);
+    let cursor = frame.buffer.cell((x, y)).unwrap();
+    let selected = frame.buffer.cell((x + 1, y)).unwrap();
+    let unselected = frame.buffer.cell((x + 3, y)).unwrap();
     assert_ne!(
         selected.modifier, unselected.modifier,
         "selection remains visible on a reversed, underlined focused input"
@@ -535,7 +636,7 @@ fn controls_contract() {
         cursor.modifier, selected.modifier,
         "cursor remains distinct with authored underline"
     );
-    key(&mut controls, Key::Right, true);
+    key(controls, Key::Right, true);
     controls
         .handle(Input::Paste("東京\r\nA\x1b[31m".into()))
         .unwrap();
@@ -544,8 +645,8 @@ fn controls_contract() {
         "e\u{301}東京 A\u{fffd}[31m",
         "selection replacement and paste remain one data edit"
     );
-    key(&mut controls, Key::Home, false);
-    key(&mut controls, Key::Delete, false);
+    key(controls, Key::Home, false);
+    key(controls, Key::Delete, false);
     assert_eq!(
         draft.raw(),
         "東京 A\u{fffd}[31m",
@@ -553,30 +654,29 @@ fn controls_contract() {
     );
     let saved = draft.raw();
     controls.set_limits(4, 100);
-    assert_eq!(
-        controls
-            .handle(Input::Paste("oversized".into()))
-            .unwrap_err()
-            .kind,
-        ErrorKind::Limit
-    );
+    let rejected = controls.handle(Input::Paste("oversized".into()));
+    assert_eq!(rejected.unwrap_err().kind, ErrorKind::Limit);
     assert_eq!(draft.raw(), saved, "rejected paste does not partially edit");
-    draw(&scope, &mut controls);
-    key(&mut controls, Key::Tab, false);
+}
+
+fn tab_and_label_focus(harness: &mut ControlsHarness) {
+    let (root, controls) = (&harness.root, &mut harness.controls);
+    draw(&harness.scope, controls);
+    key(controls, Key::Tab, false);
     assert_eq!(controls.focus(), root.find("readonly"));
     assert!(
-        blurred.get(),
+        harness.blurred.get(),
         "internal touch-on-blur precedes the authored blur listener"
     );
     controls.handle(Input::Paste("no".into())).unwrap();
     assert_eq!(root.find("readonly").unwrap().value(), "Read only");
-    key(&mut controls, Key::Down, false);
+    key(controls, Key::Down, false);
     assert_eq!(
         controls.focus(),
         root.find("readonly"),
         "vertical navigation skips disabled, hidden and negative tabindex controls without wrapping"
     );
-    key(&mut controls, Key::Tab, false);
+    key(controls, Key::Tab, false);
     assert_eq!(
         controls.focus(),
         root.find("activate"),
@@ -590,70 +690,78 @@ fn controls_contract() {
         root.find("explicit"),
         "negative tabindex permits explicit label focus"
     );
-    controls.set_focus(&input).unwrap();
-    visible.set(false);
-    draw(&scope, &mut controls);
+}
+
+fn structural_focus_changes(harness: &mut ControlsHarness) {
+    let (root, controls, scope) = (&harness.root, &mut harness.controls, &harness.scope);
+    controls.set_focus(&root.find("draft").unwrap()).unwrap();
+    harness.visible.set(false);
+    draw(scope, controls);
     assert_eq!(
         controls.focus(),
         root.find("readonly"),
         "removed focus moves to the next surviving control"
     );
-    visible.set(true);
-    remove_on_focus.set(true);
-    draw(&scope, &mut controls);
-    key(&mut controls, Key::Up, false);
+    harness.visible.set(true);
+    harness.remove_on_focus.set(true);
+    draw(scope, controls);
+    key(controls, Key::Up, false);
     assert_eq!(
         controls.focus(),
         root.find("readonly"),
         "focus callback may remove its own control"
     );
-    duplicate.set(true);
+    harness.duplicate.set(true);
     assert_eq!(scope.take_errors()[0].kind, ErrorKind::Template);
     assert_eq!(root.find("duplicate").unwrap().text(), "Committed");
-    disabled.set(false);
-    draw(&scope, &mut controls);
-    key(&mut controls, Key::Tab, false);
+    harness.disabled.set(false);
+    draw(scope, controls);
+    key(controls, Key::Tab, false);
     assert_eq!(
         controls.focus(),
         root.find("disabled"),
         "dynamic enablement updates document-order focus"
     );
+}
+
+fn scrolling_reveals_focus(harness: &mut ControlsHarness) {
+    let (root, controls, scope) = (&harness.root, &mut harness.controls, &harness.scope);
     // Existing focus/identity checks did not protect visibility after layout changes.
-    draw_at(&scope, &mut controls, (80, 3));
+    draw_at(scope, controls, (80, 3));
     assert!(
-        draw_at(&scope, &mut controls, (80, 3)),
+        draw_at(scope, controls, (80, 3)),
         "resize reveals retained focus"
     );
     let viewport = root.find("controls").unwrap();
     assert!(controls.scrolls_mut().offset(&viewport).1 > 0);
-    key(&mut controls, Key::Up, false);
+    key(controls, Key::Up, false);
     assert_eq!(controls.focus(), root.find("readonly"));
-    key(&mut controls, Key::Up, false);
+    key(controls, Key::Up, false);
     assert_eq!(controls.focus(), root.find("activate"));
     assert!(
-        draw_at(&scope, &mut controls, (80, 3)),
+        draw_at(scope, controls, (80, 3)),
         "arrows reveal offscreen controls above the viewport"
     );
-    key(&mut controls, Key::Down, false);
+    key(controls, Key::Down, false);
     assert_eq!(controls.focus(), root.find("readonly"));
-    key(&mut controls, Key::Down, false);
+    key(controls, Key::Down, false);
     assert_eq!(controls.focus(), root.find("disabled"));
     assert!(
-        draw_at(&scope, &mut controls, (80, 3)),
+        draw_at(scope, controls, (80, 3)),
         "arrows reveal offscreen controls below the viewport"
     );
-    key(&mut controls, Key::PageUp, false);
-    draw_at(&scope, &mut controls, (80, 3));
+    key(controls, Key::PageUp, false);
+    draw_at(scope, controls, (80, 3));
     assert_eq!(
         controls.scrolls_mut().offset(&viewport).1,
         0,
         "manual scrolling does not immediately snap back to focus"
     );
-    remove_on_focus.set(false);
-    visible.set(true);
-    draw_at(&scope, &mut controls, (80, 3));
+    harness.remove_on_focus.set(false);
+    harness.visible.set(true);
+    draw_at(scope, controls, (80, 3));
     assert!(
-        draw_at(&scope, &mut controls, (80, 3)),
+        draw_at(scope, controls, (80, 3)),
         "structural geometry changes reveal retained focus"
     );
 }

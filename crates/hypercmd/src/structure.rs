@@ -22,9 +22,8 @@ impl Scope {
             let data = signal(value);
             let next = untrack(|| prepare(index, data.clone(), &owner))?;
             target.set_children(vec![next.root()])?;
-            let previous = current.replace((index, data, next));
-            current.as_ref().unwrap().2.publish();
-            drop(previous);
+            next.publish();
+            current = Some((index, data, next));
             Ok(())
         })
     }
@@ -125,7 +124,7 @@ impl Scope {
             Ok(())
         })
     }
-    pub fn children(&mut self, id: usize, children: Children) -> Result<(), Error> {
+    pub fn children(&mut self, id: usize, children: &Children) -> Result<(), Error> {
         let target = self.mount(id)?;
         if let Some(scope) = untrack(|| children.prepare(&self.owner()))? {
             target.set_children(vec![scope.root()])?;

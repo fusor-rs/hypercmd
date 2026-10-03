@@ -40,7 +40,7 @@ the nearest timer/input deadline determines how long the runner sleeps.
 
 ## Blocking workers
 
-`services.worker(token, move |cancelled| result)?` starts bounded blocking work
+`services.worker(&token, move |cancelled| result)?` starts bounded blocking work
 and returns a future yielding `Result<T, Error>`, where `T: Send + 'static`.
 The closure receives `Arc<AtomicBool>` and should check it between operations.
 Only owned input, output and that cancellation flag cross threads; `Rc`-based UI

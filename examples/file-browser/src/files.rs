@@ -141,26 +141,32 @@ mod tests {
         os::unix::{ffi::OsStringExt, fs::symlink},
     };
 
-    #[test]
-    fn bounded_read_only_loading_preserves_paths_and_rejects_non_text_sources() {
-        let directory = tempfile::tempdir().unwrap();
+    // A folder, a text file, a file with a non-UTF-8 or non-ASCII name, a
+    // symbolic link and a FIFO.
+    fn fixture() -> (tempfile::TempDir, PathBuf) {
+        let directory = tempfile::tempdir().expect("create a temporary directory");
         let root = directory.path();
-        fs::create_dir(root.join("z-folder")).unwrap();
-        fs::write(root.join("a.txt"), "Hello, 世界\n").unwrap();
+        fs::create_dir(root.join("z-folder")).expect("create a folder");
+        fs::write(root.join("a.txt"), "Hello, 世界\n").expect("write a text file");
         let unusual = root.join(if cfg!(target_os = "linux") {
             OsString::from_vec(b"z-\xff.txt".to_vec())
         } else {
             OsString::from("z-日本語.txt")
         });
-        fs::write(&unusual, "Exact path").unwrap();
-        symlink(root.join("a.txt"), root.join("link")).unwrap();
-        assert!(
-            std::process::Command::new("mkfifo")
-                .arg(root.join("pipe"))
-                .status()
-                .unwrap()
-                .success()
-        );
+        fs::write(&unusual, "Exact path").expect("write the unusual name");
+        symlink(root.join("a.txt"), root.join("link")).expect("create a symbolic link");
+        let fifo = std::process::Command::new("mkfifo")
+            .arg(root.join("pipe"))
+            .status()
+            .expect("run mkfifo");
+        assert!(fifo.success());
+        (directory, unusual)
+    }
+
+    #[test]
+    fn listings_sort_folders_first_and_keep_exact_paths() {
+        let (directory, unusual) = fixture();
+        let root = directory.path();
         let cancelled = AtomicBool::new(false);
         let listing = read_directory(root, &cancelled).unwrap();
         assert!(!listing.truncated);
@@ -172,16 +178,17 @@ mod tests {
             assert!(read_preview(&entry.path, &cancelled).is_err());
         }
         assert_eq!(listing.entries[4].path, unusual);
-        assert_eq!(
-            read_preview(&unusual, &cancelled).unwrap().text,
-            "Exact path"
-        );
-        assert_eq!(
-            read_preview(&root.join("a.txt"), &cancelled).unwrap().text,
-            "Hello, 世界\n"
-        );
+        let exact = read_preview(&unusual, &cancelled).unwrap();
+        assert_eq!(exact.text, "Exact path");
+        let text = read_preview(&root.join("a.txt"), &cancelled).unwrap();
+        assert_eq!(text.text, "Hello, 世界\n");
+    }
 
-        let large = root.join("large.txt");
+    #[test]
+    fn previews_truncate_and_reject_binary_or_invalid_text() {
+        let directory = tempfile::tempdir().unwrap();
+        let large = directory.path().join("large.txt");
+        let cancelled = AtomicBool::new(false);
         fs::write(&large, format!("{}世界", "a".repeat(PREVIEW_BYTES - 1))).unwrap();
         let preview = read_preview(&large, &cancelled).unwrap();
         assert!(preview.truncated);
@@ -190,6 +197,13 @@ mod tests {
             fs::write(&large, bytes).unwrap();
             assert!(read_preview(&large, &cancelled).is_err());
         }
+    }
+
+    #[test]
+    fn listings_truncate_at_the_entry_limit_and_cancellation_stops_reads() {
+        let (directory, _) = fixture();
+        let root = directory.path();
+        let cancelled = AtomicBool::new(false);
         for index in 0..MAX_ENTRIES {
             fs::write(root.join(format!("entry-{index}")), []).unwrap();
         }
@@ -198,6 +212,6 @@ mod tests {
         assert_eq!(listing.entries.len(), MAX_ENTRIES);
         cancelled.store(true, Ordering::Relaxed);
         assert!(read_directory(root, &cancelled).is_err());
-        assert!(read_preview(&large, &cancelled).is_err());
+        assert!(read_preview(&root.join("a.txt"), &cancelled).is_err());
     }
 }

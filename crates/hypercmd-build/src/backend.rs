@@ -129,19 +129,26 @@ impl Backend for HypercmdBackend {
     fn validate(&self, template: &Template) -> Result<(), ExtractError> {
         let mut ids = std::collections::BTreeSet::new();
         for node in &template.nodes {
-            if let NodeKind::Element {
+            let NodeKind::Element {
                 tag, attributes, ..
             } = &node.kind
-            {
-                if !profile::ELEMENTS.contains(&tag.as_str()) {
-                    return Err(node.origin.error(format!("terminal-v1 does not support <{tag}>; use a supported container, text element, button or input")));
-                }
-                let kind = control_kind(tag, attributes);
-                for attribute in attributes {
-                    validate_attribute(tag, kind, attribute)?;
-                    if attribute.name == "id" && !ids.insert(&attribute.value) {
-                        return Err(attribute.origin.error("duplicate id in this template; give each element in a component a unique id"));
-                    }
+            else {
+                continue;
+            };
+            if !profile::ELEMENTS.contains(&tag.as_str()) {
+                return Err(node.origin.error(format!(
+                    "terminal-v1 does not support <{tag}>; \
+                     use a supported container, text element, button or input"
+                )));
+            }
+            let kind = control_kind(tag, attributes);
+            for attribute in attributes {
+                validate_attribute(tag, kind, attribute)?;
+                if attribute.name == "id" && !ids.insert(&attribute.value) {
+                    return Err(attribute.origin.error(
+                        "duplicate id in this template; \
+                         give each element in a component a unique id",
+                    ));
                 }
             }
         }
@@ -215,7 +222,7 @@ impl Backend for HypercmdBackend {
                 quote!(component::<#ty, _, _, _>),
                 quote!(#identity, #make, #children),
             ),
-            OperationKind::Children { children } => (quote!(children), quote!(#children)),
+            OperationKind::Children { children } => (quote!(children), quote!(&#children)),
             OperationKind::Async { boundary, render } => {
                 (quote!(async_region), quote!(#boundary, #render))
             }
@@ -266,7 +273,20 @@ impl Backend for HypercmdBackend {
             }
         };
         quote! {
-            #[allow(unused_variables, unused_braces, non_snake_case, clippy::unused_unit, clippy::unit_arg, clippy::clone_on_copy, clippy::useless_conversion)]
+            #[allow(
+                unused_variables,
+                unused_braces,
+                non_snake_case,
+                clippy::unused_unit,
+                clippy::unit_arg,
+                clippy::clone_on_copy,
+                clippy::useless_conversion,
+                clippy::redundant_clone,
+                clippy::too_many_lines,
+                clippy::cognitive_complexity,
+                clippy::excessive_nesting,
+                reason = "generated from an HTML template; its shape follows the template, not hand-written style"
+            )]
             #implementation
         }
     }

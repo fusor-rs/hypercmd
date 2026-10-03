@@ -61,7 +61,11 @@ pub fn compile_app() -> Result<()> {
     println!("cargo::rerun-if-changed={}", manifest_path.display());
     let Manifest { package } = toml::from_str(&fs::read_to_string(&manifest_path)?)?;
     let config = package.metadata.hypercmd;
-    if let Some(profile) = config.profile.as_deref().filter(|p| *p != profile::NAME) {
+    if let Some(profile) = config
+        .profile
+        .as_deref()
+        .filter(|name| *name != profile::NAME)
+    {
         return Err(format!(
             "unsupported Hypercmd profile {profile:?}; use {:?}",
             profile::NAME

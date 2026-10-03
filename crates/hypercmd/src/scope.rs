@@ -1,4 +1,7 @@
-use crate::{Error, Node, scene::Scene};
+use crate::{
+    Error, Node,
+    scene::{Scene, ScopeShared},
+};
 use fusor::{ContextKey, Effect, Owner, OwnerHandle, Registration};
 use std::{
     any::Any,
@@ -125,13 +128,6 @@ impl Scope {
         if owner.handle().is_disposed() {
             return Err(Error::template("cannot mount below a disposed owner"));
         }
-        let inherited_services = parent.and_then(|parent| parent.context::<crate::Services>());
-        let services = inherited_services
-            .as_deref()
-            .cloned()
-            .unwrap_or_else(crate::Services::new);
-        let shutdown_services = inherited_services.is_none().then(|| services.clone());
-        owner.handle().provide::<crate::Services>(services)?;
         if owner
             .handle()
             .context::<crate::coherent::Context>()
@@ -144,74 +140,20 @@ impl Scope {
                 "editable controls are unsupported inside coherent regions",
             ));
         }
-        let scene = parent
-            .and_then(|parent| parent.context::<SceneContext>())
-            .map(|s| (*s).clone())
-            .unwrap_or_default();
-        owner.handle().provide::<SceneContext>(scene.clone())?;
-        let component = COMPONENT
-            .with(|current| current.take())
-            .or_else(|| {
-                parent
-                    .and_then(|parent| parent.context::<InstanceContext>())
-                    .map(|value| (*value).clone())
-            })
-            .unwrap_or_default();
-        owner
-            .handle()
-            .provide::<InstanceContext>(component.clone())?;
-        let node = |tag, text: &str, attrs: &[(&str, &str)]| {
-            Node::new(
-                owner.handle(),
-                scene.clone(),
-                tag,
-                text,
-                attrs,
-                styles,
-                component.clone(),
-            )
-        };
-        let root = node("#scope", "", &[]);
-        if component.root.borrow().upgrade().is_none() {
-            component.root.replace(Rc::downgrade(&root.0));
+        let (shared, shutdown_services) = provide_contexts(&owner.handle(), parent, styles)?;
+        let root = Node::new(&shared, "#scope", "", &[]);
+        if shared.component.root.borrow().upgrade().is_none() {
+            shared.component.root.replace(Rc::downgrade(&root.0));
         }
-        let mut nodes: Vec<Node> = Vec::with_capacity(specs.len());
-        let (mut elements, mut texts, mut mounts) =
-            (BTreeMap::new(), BTreeMap::new(), BTreeMap::new());
-        let mut ids = BTreeSet::new();
-        for spec in specs {
-            let (tag, text, attrs) = match spec.kind {
-                Kind::Element(tag, attrs, _) => (tag, "", attrs),
-                Kind::Text(text, _) => ("#text", text, &[][..]),
-                Kind::Mount(_) => ("#mount", "", &[][..]),
-                Kind::Comment => ("#comment", "", &[][..]),
-            };
-            let node = node(tag, text, attrs);
-            if let Some(id) = node.attribute("id") {
-                if !ids.insert(id) {
-                    return Err(Error::template("duplicate id in component template"));
-                }
-            }
-            let anchor = match spec.kind {
-                Kind::Element(_, _, Some(id)) => Some((&mut elements, id)),
-                Kind::Text(_, Some(id)) => Some((&mut texts, id)),
-                Kind::Mount(id) => Some((&mut mounts, id)),
-                _ => None,
-            };
-            if let Some((anchors, id)) = anchor {
-                if anchors.insert(id, node.clone()).is_some() {
-                    return Err(Error::template("duplicate template anchor"));
-                }
-            }
-            let parent = match spec.parent {
-                Some(index) => nodes
-                    .get(index)
-                    .ok_or_else(|| Error::template("template parent must precede child"))?,
-                None => &root,
-            };
-            parent.0.children.borrow_mut().push(node.clone());
-            nodes.push(node);
-        }
+        let (
+            nodes,
+            Anchors {
+                elements,
+                texts,
+                mounts,
+            },
+        ) = instantiate(&shared, &root, specs)?;
+        let scene = shared.scene;
         let retained = Rc::new(RefCell::new(Retained::default()));
         let weak = Rc::downgrade(&retained);
         let coherent =
@@ -311,4 +253,88 @@ pub(crate) fn anchor(map: &BTreeMap<usize, Node>, kind: &str, id: usize) -> Resu
     map.get(&id)
         .cloned()
         .ok_or_else(|| Error::template(format!("missing {kind} anchor {id}")))
+}
+
+// A child scope inherits its parent's services, scene and component instance;
+// a root scope creates them and shuts its services down on cleanup.
+fn provide_contexts(
+    owner: &OwnerHandle,
+    parent: Option<&OwnerHandle>,
+    styles: crate::style::StyleSheet,
+) -> Result<(ScopeShared, Option<crate::Services>), Error> {
+    let inherited_services = parent.and_then(|parent| parent.context::<crate::Services>());
+    let services = inherited_services
+        .as_deref()
+        .cloned()
+        .unwrap_or_else(crate::Services::new);
+    let shutdown_services = inherited_services.is_none().then(|| services.clone());
+    owner.provide::<crate::Services>(services)?;
+    let scene = parent
+        .and_then(|parent| parent.context::<SceneContext>())
+        .map(|scene| (*scene).clone())
+        .unwrap_or_default();
+    owner.provide::<SceneContext>(scene.clone())?;
+    let component = COMPONENT
+        .with(|current| current.take())
+        .or_else(|| {
+            parent
+                .and_then(|parent| parent.context::<InstanceContext>())
+                .map(|value| (*value).clone())
+        })
+        .unwrap_or_default();
+    owner.provide::<InstanceContext>(component.clone())?;
+    let shared = ScopeShared {
+        owner: owner.clone(),
+        scene,
+        styles,
+        component,
+    };
+    Ok((shared, shutdown_services))
+}
+
+#[derive(Default)]
+struct Anchors {
+    elements: BTreeMap<usize, Node>,
+    texts: BTreeMap<usize, Node>,
+    mounts: BTreeMap<usize, Node>,
+}
+
+fn instantiate(
+    shared: &ScopeShared,
+    root: &Node,
+    specs: &[StaticNode],
+) -> Result<(Vec<Node>, Anchors), Error> {
+    let mut nodes: Vec<Node> = Vec::with_capacity(specs.len());
+    let mut anchors = Anchors::default();
+    let mut ids = BTreeSet::new();
+    for spec in specs {
+        let (tag, text, attrs) = match spec.kind {
+            Kind::Element(tag, attrs, _) => (tag, "", attrs),
+            Kind::Text(text, _) => ("#text", text, &[][..]),
+            Kind::Mount(_) => ("#mount", "", &[][..]),
+            Kind::Comment => ("#comment", "", &[][..]),
+        };
+        let node = Node::new(shared, tag, text, attrs);
+        if node.attribute("id").is_some_and(|id| !ids.insert(id)) {
+            return Err(Error::template("duplicate id in component template"));
+        }
+        let anchor = match spec.kind {
+            Kind::Element(_, _, Some(id)) => Some((&mut anchors.elements, id)),
+            Kind::Text(_, Some(id)) => Some((&mut anchors.texts, id)),
+            Kind::Mount(id) => Some((&mut anchors.mounts, id)),
+            _ => None,
+        };
+        if anchor.is_some_and(|(map, id)| map.insert(id, node.clone()).is_some()) {
+            return Err(Error::template("duplicate template anchor"));
+        }
+        let parent = match spec.parent {
+            Some(index) => nodes
+                .get(index)
+                .ok_or_else(|| Error::template("template parent must precede child"))?,
+            None => root,
+        };
+        parent.0.children.borrow_mut().push(node.clone());
+        nodes.push(node);
+    }
+    Ok((nodes, anchors))
 }

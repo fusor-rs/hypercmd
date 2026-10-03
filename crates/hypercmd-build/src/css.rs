@@ -153,71 +153,75 @@ fn declaration(name: &str, value: &str) -> Result<Vec<TokenStream>, String> {
         .find(|(property, _, _)| *property == name)
         .ok_or_else(|| format!("unsupported terminal-v1 property {name}; {PROPERTY_HELP}"))?;
     let invalid = || format!("unsupported {name}: {value}; accepted values: {accepted}");
-    let one = |variant: &str, value: TokenStream| {
-        let variant = format_ident!("{variant}");
-        vec![quote!(::hypercmd::style::Declaration::#variant(#value))]
-    };
     if matches!(variant, "Gap" | "Padding") {
-        let sides: &[&str] = if variant == "Gap" {
-            &["RowGap", "ColumnGap"]
-        } else {
-            &["PaddingTop", "PaddingRight", "PaddingBottom", "PaddingLeft"]
-        };
-        let values: Vec<_> = value
-            .split_whitespace()
-            .map(|value| length(value, false))
-            .collect::<Option<_>>()
-            .ok_or_else(invalid)?;
-        let indices = match (sides.len(), values.len()) {
-            (_, 1) => [0, 0, 0, 0],
-            (_, 2) => [0, 1, 0, 1],
-            (4, 3) => [0, 1, 2, 1],
-            (4, 4) => [0, 1, 2, 3],
-            _ => return Err(invalid()),
-        };
-        return Ok(sides
-            .iter()
-            .zip(indices)
-            .flat_map(|(side, index)| one(side, values[index].clone()))
-            .collect());
+        return shorthand(variant, value).ok_or_else(invalid);
     }
     let token = match accepted {
-        LENGTH | SPACING => length(value, accepted == LENGTH).ok_or_else(invalid)?,
-        NUMBER => {
-            let number = number(value).ok_or_else(invalid)?;
-            quote!(#number)
-        }
-        COLOR => color(value).ok_or_else(invalid)?,
-        _ => {
-            let index = accepted
-                .split(" | ")
-                .position(|choice| choice == value)
-                .ok_or_else(invalid)?;
-            if matches!(variant, "Display" | "Row" | "Bold" | "Italic" | "Underline") {
-                let enabled = index == 0;
-                quote!(#enabled)
-            } else {
-                let kind = format_ident!(
-                    "{}",
-                    if matches!(variant, "AlignItems" | "AlignSelf" | "Justify") {
-                        "Alignment"
-                    } else {
-                        variant
-                    }
-                );
-                let keyword = format_ident!("{}", camel(value.trim_start_matches("flex-")));
-                quote!(::hypercmd::style::#kind::#keyword)
-            }
-        }
-    };
-    Ok(one(variant, token))
+        LENGTH | SPACING => length(value, accepted == LENGTH),
+        NUMBER => number(value).map(|number| quote!(#number)),
+        COLOR => color(value),
+        _ => keyword(variant, value, accepted),
+    }
+    .ok_or_else(invalid)?;
+    Ok(vec![declaration_token(variant, &token)])
 }
+
+fn declaration_token(variant: &str, value: &TokenStream) -> TokenStream {
+    let variant = format_ident!("{variant}");
+    quote!(::hypercmd::style::Declaration::#variant(#value))
+}
+
+// Expands `gap` and `padding` the way CSS does for one to four values.
+fn shorthand(variant: &str, value: &str) -> Option<Vec<TokenStream>> {
+    let sides: &[&str] = if variant == "Gap" {
+        &["RowGap", "ColumnGap"]
+    } else {
+        &["PaddingTop", "PaddingRight", "PaddingBottom", "PaddingLeft"]
+    };
+    let values: Vec<_> = value
+        .split_whitespace()
+        .map(|value| length(value, false))
+        .collect::<Option<_>>()?;
+    let indices = match (sides.len(), values.len()) {
+        (_, 1) => [0, 0, 0, 0],
+        (_, 2) => [0, 1, 0, 1],
+        (4, 3) => [0, 1, 2, 1],
+        (4, 4) => [0, 1, 2, 3],
+        _ => return None,
+    };
+    Some(
+        sides
+            .iter()
+            .zip(indices)
+            .map(|(side, index)| declaration_token(side, &values[index]))
+            .collect(),
+    )
+}
+
+// Boolean properties list their true value first in the accepted list.
+fn keyword(variant: &str, value: &str, accepted: &str) -> Option<TokenStream> {
+    let index = accepted.split(" | ").position(|choice| choice == value)?;
+    if matches!(variant, "Display" | "Row" | "Bold" | "Italic" | "Underline") {
+        let enabled = index == 0;
+        return Some(quote!(#enabled));
+    }
+    let kind = if matches!(variant, "AlignItems" | "AlignSelf" | "Justify") {
+        "Alignment"
+    } else {
+        variant
+    };
+    let kind = format_ident!("{kind}");
+    let keyword = format_ident!("{}", camel(value.trim_start_matches("flex-")));
+    Some(quote!(::hypercmd::style::#kind::#keyword))
+}
+
 fn camel(value: &str) -> String {
     value
         .split('-')
-        .map(|word| {
+        .flat_map(|word| {
             let mut chars = word.chars();
-            chars.next().unwrap().to_ascii_uppercase().to_string() + chars.as_str()
+            let first = chars.next().map(|first| first.to_ascii_uppercase());
+            first.into_iter().chain(chars)
         })
         .collect()
 }
@@ -249,8 +253,8 @@ fn color(value: &str) -> Option<TokenStream> {
         .filter(|value| value.len() == 6 && value.bytes().all(|byte| byte.is_ascii_hexdigit()))
     {
         let rgb = u32::from_str_radix(hex, 16).ok()?;
-        let (r, g, b) = ((rgb >> 16) as u8, (rgb >> 8) as u8, rgb as u8);
-        return Some(quote!(::hypercmd::style::Color::Rgb(#r, #g, #b)));
+        let (red, green, blue) = ((rgb >> 16) as u8, (rgb >> 8) as u8, rgb as u8);
+        return Some(quote!(::hypercmd::style::Color::Rgb(#red, #green, #blue)));
     }
     let name = match value {
         "default" => "Reset",

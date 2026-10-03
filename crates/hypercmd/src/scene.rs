@@ -74,28 +74,33 @@ impl std::fmt::Debug for Node {
     }
 }
 
+pub(crate) struct ScopeShared {
+    pub owner: OwnerHandle,
+    pub scene: Rc<Scene>,
+    pub styles: crate::style::StyleSheet,
+    pub component: Rc<crate::scope::Instance>,
+}
+
 impl Node {
     pub(crate) fn new(
-        owner: OwnerHandle,
-        scene: Rc<Scene>,
+        shared: &ScopeShared,
         tag: &'static str,
         text: &str,
         attrs: &[(&str, &str)],
-        styles: crate::style::StyleSheet,
-        component: Rc<crate::scope::Instance>,
     ) -> Self {
         let attrs: BTreeMap<String, String> = attrs
             .iter()
-            .map(|(k, v)| ((*k).into(), (*v).into()))
+            .map(|(name, value)| ((*name).into(), (*value).into()))
             .collect();
-        let gate = owner
+        let gate = shared
+            .owner
             .context::<crate::coherent::Context>()
             .map(|gate| (*gate).clone());
         Self(Rc::new(NodeData {
-            owner,
-            scene,
-            styles,
-            component,
+            owner: shared.owner.clone(),
+            scene: shared.scene.clone(),
+            styles: shared.styles,
+            component: shared.component.clone(),
             tag,
             value: RefCell::new(attrs.get("value").cloned().unwrap_or_default()),
             checked: Cell::new(attrs.contains_key("checked")),

@@ -99,20 +99,7 @@ impl Scope {
         });
         let mut region = Scope::new(Some(&self.owner()), &[])?;
         region.owner().provide::<Context>(gate.clone())?;
-        let within = |anchors: &BTreeMap<usize, Node>| {
-            anchors
-                .iter()
-                .filter(|(_, node)| nodes.contains(node))
-                .map(|(id, node)| (*id, node.clone()))
-                .collect()
-        };
-        let tree = Tree::inherited(
-            &region.owner(),
-            &within(&self.elements),
-            &within(&self.texts),
-            &within(&self.mounts),
-        )
-        .expect("region context was installed");
+        let tree = self.region_tree(&region.owner(), &nodes);
         region.coherent = Some(tree.clone());
         region.set_coherent_renderer(render);
         for node in nodes {
@@ -125,35 +112,64 @@ impl Scope {
             }
         }));
         let scene = self.root.0.scene.clone();
-        let scene_for_publication = scene.clone();
-        let mounted = boundary
-            .attach(&region.owner(), move |attempt| {
-                let mut prepared = Prepared {
-                    scene: scene_for_publication.clone(),
-                    gate: gate.clone(),
-                    owners: Vec::new(),
-                    updates: BTreeMap::new(),
-                    finish: Vec::new(),
-                };
-                visit(&tree, attempt, &mut prepared)?;
-                Ok(Box::new(prepared))
-            })
-            .map_err(Error::template)?;
+        let mounted = publish_attempts(&region.owner(), &boundary, tree, gate, scene.clone())?;
         region.retain(mounted);
-        region.retain(fusor::effect(move || match boundary.status() {
-            BoundaryStatus::Error(message) => {
-                scene.report(Error::new(ErrorKind::Publication, message))
-            }
-            BoundaryStatus::Faulted(message) => {
-                scene.faulted.set(true);
-                scene.report(Error::new(ErrorKind::Publication, message));
-            }
-            _ => scene.changed(),
-        }));
+        region.retain(report_status(boundary, scene));
         region.publish();
         self.retain(region);
         Ok(())
     }
+
+    fn region_tree(&self, region: &OwnerHandle, nodes: &[Node]) -> Rc<Tree> {
+        let within = |anchors: &BTreeMap<usize, Node>| {
+            anchors
+                .iter()
+                .filter(|(_, node)| nodes.contains(node))
+                .map(|(id, node)| (*id, node.clone()))
+                .collect()
+        };
+        Tree::inherited(
+            region,
+            &within(&self.elements),
+            &within(&self.texts),
+            &within(&self.mounts),
+        )
+        .expect("region context was installed")
+    }
+}
+
+// Each attempt renders the region's tree into a staged publication.
+fn publish_attempts(
+    region: &OwnerHandle,
+    boundary: &AsyncBoundary,
+    tree: Rc<Tree>,
+    gate: Rc<Gate>,
+    scene: Rc<crate::scene::Scene>,
+) -> Result<fusor::coherence::BoundaryMount, Error> {
+    boundary
+        .attach(region, move |attempt| {
+            let mut prepared = Prepared {
+                scene: scene.clone(),
+                gate: gate.clone(),
+                owners: Vec::new(),
+                updates: BTreeMap::new(),
+                finish: Vec::new(),
+            };
+            visit(&tree, attempt, &mut prepared)?;
+            Ok(Box::new(prepared))
+        })
+        .map_err(Error::template)
+}
+
+fn report_status(boundary: AsyncBoundary, scene: Rc<crate::scene::Scene>) -> fusor::Effect {
+    fusor::effect(move || match boundary.status() {
+        BoundaryStatus::Error(message) => scene.report(Error::new(ErrorKind::Publication, message)),
+        BoundaryStatus::Faulted(message) => {
+            scene.faulted.set(true);
+            scene.report(Error::new(ErrorKind::Publication, message));
+        }
+        _ => scene.changed(),
+    })
 }
 
 fn identity(node: &Node) -> usize {
@@ -332,14 +348,14 @@ impl Frame<'_> {
         if discarded.is_some() {
             let weak = Rc::downgrade(&slot);
             self.attempt.on_invalidate(move || {
-                if let Some(slot) = weak.upgrade() {
-                    let candidate = {
-                        let mut state = slot.borrow_mut();
-                        state.epoch = 0;
-                        std::mem::take(&mut state.candidate)
-                    };
-                    drop(candidate);
-                }
+                let Some(slot) = weak.upgrade() else {
+                    return;
+                };
+                let mut state = slot.borrow_mut();
+                state.epoch = 0;
+                let candidate = std::mem::take(&mut state.candidate);
+                drop(state);
+                drop(candidate);
             });
         }
         drop(discarded);
@@ -580,7 +596,7 @@ impl Frame<'_> {
         });
         Ok(())
     }
-    pub fn children(&mut self, id: usize, children: Children) -> Result<(), String> {
+    pub fn children(&mut self, id: usize, children: &Children) -> Result<(), String> {
         let target = self.mount(id)?;
         let slot = self.slot::<Option<Rc<Scope>>>(SlotKey::Children(id))?;
         let existing = slot.borrow().find(Clone::clone);

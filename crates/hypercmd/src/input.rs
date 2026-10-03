@@ -5,6 +5,7 @@ const ESCAPE_WAIT: Duration = Duration::from_millis(40);
 const MAX_SEQUENCE: usize = 64;
 const PASTE_END: &[u8] = b"\x1b[201~";
 
+#[derive(Debug, PartialEq)]
 pub(crate) enum Decoded {
     Input(Input),
     Shutdown,
@@ -87,7 +88,7 @@ impl Decoder {
         let complete = match self.sequence.as_slice() {
             [0x1b] | [0x1b, b'[' | b'O'] => false,
             [0x1b, b'[' | b'O', rest @ ..] => {
-                rest.last().is_some_and(|b| (0x40..=0x7e).contains(b))
+                rest.last().is_some_and(|byte| (0x40..=0x7e).contains(byte))
             }
             _ => true,
         };
@@ -219,60 +220,32 @@ mod tests {
     fn fragmented_unicode_and_keys_preserve_event_kind() {
         let now = Instant::now();
         let mut decoder = Decoder::new(8);
-        let mut events = Vec::new();
-        for byte in
-            "界\x1b[1;2D\x1b[32;1:3u\x1b[32;1:2u\x03\x1b[A\x1bOB\x1b[1;1:3A\x1b[1;1:2B".bytes()
-        {
-            if let Some(event) = decoder.feed(byte, now).unwrap() {
-                events.push(event);
-            }
-        }
-        assert!(matches!(
-            &events[0],
-            Decoded::Input(Input::Key {
-                key: Key::Char('界'),
-                ..
-            })
-        ));
-        assert!(matches!(
-            &events[1],
-            Decoded::Input(Input::Key {
-                key: Key::Left,
-                shift: true,
-                ..
-            })
-        ));
-        assert!(matches!(
-            &events[2],
-            Decoded::Input(Input::Key {
-                kind: KeyKind::Release,
-                ..
-            })
-        ));
-        assert!(matches!(
-            &events[3],
-            Decoded::Input(Input::Key {
-                kind: KeyKind::Repeat,
-                ..
-            })
-        ));
-        assert!(matches!(&events[4], Decoded::Shutdown));
-        for (event, key, kind) in [
-            (&events[5], Key::Up, KeyKind::Press),
-            (&events[6], Key::Down, KeyKind::Press),
-            (&events[7], Key::Up, KeyKind::Release),
-            (&events[8], Key::Down, KeyKind::Repeat),
-        ] {
-            assert!(
-                matches!(event, Decoded::Input(input) if *input == Input::Key { key, shift: false, kind })
-            );
-        }
+        let events: Vec<_> =
+            "界\x1b[1;2D\x1b[32;1:3u\x1b[32;1:2u\x03\x1b[A\x1bOB\x1b[1;1:3A\x1b[1;1:2B"
+                .bytes()
+                .filter_map(|byte| decoder.feed(byte, now).unwrap())
+                .collect();
+        let key = |key, shift, kind| Decoded::Input(Input::Key { key, shift, kind });
+        assert_eq!(
+            events,
+            [
+                key(Key::Char('界'), false, KeyKind::Press),
+                key(Key::Left, true, KeyKind::Press),
+                key(Key::Char(' '), false, KeyKind::Release),
+                key(Key::Char(' '), false, KeyKind::Repeat),
+                Decoded::Shutdown,
+                key(Key::Up, false, KeyKind::Press),
+                key(Key::Down, false, KeyKind::Press),
+                key(Key::Up, false, KeyKind::Release),
+                key(Key::Down, false, KeyKind::Repeat),
+            ]
+        );
         decoder.feed(0x1b, now).unwrap();
         decoder.expire(now + ESCAPE_WAIT);
         assert!(decoder.timeout(now).is_none());
-        assert!(matches!(
+        assert_eq!(
             decoder.feed(b'x', now).unwrap(),
-            Some(Decoded::Input(_))
-        ));
+            Some(key(Key::Char('x'), false, KeyKind::Press))
+        );
     }
 }

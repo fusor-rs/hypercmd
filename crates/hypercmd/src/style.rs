@@ -187,32 +187,12 @@ impl Computed {
             Declaration::PaddingBottom(value) => self.layout.padding.bottom = spacing(value),
             Declaration::PaddingLeft(value) => self.layout.padding.left = spacing(value),
             Declaration::AlignItems(value) => self.layout.align_items = align(value),
-            Declaration::AlignSelf(value) => {
-                self.layout.align_self = align(value).map(|value| match value {
-                    AlignItems::FlexStart => AlignSelf::FlexStart,
-                    AlignItems::FlexEnd => AlignSelf::FlexEnd,
-                    AlignItems::Center => AlignSelf::Center,
-                    _ => AlignSelf::Stretch,
-                })
-            }
-            Declaration::Justify(value) => {
-                self.layout.justify_content = Some(match value {
-                    Alignment::Center => JustifyContent::Center,
-                    Alignment::End => JustifyContent::FlexEnd,
-                    Alignment::SpaceBetween => JustifyContent::SpaceBetween,
-                    Alignment::SpaceAround => JustifyContent::SpaceAround,
-                    Alignment::SpaceEvenly => JustifyContent::SpaceEvenly,
-                    _ => JustifyContent::FlexStart,
-                })
-            }
+            Declaration::AlignSelf(value) => self.layout.align_self = align_self(value),
+            Declaration::Justify(value) => self.layout.justify_content = Some(justify(value)),
             Declaration::Overflow(value) => {
                 self.overflow = value;
-                let value = match value {
-                    Overflow::Visible => taffy::Overflow::Visible,
-                    Overflow::Hidden => taffy::Overflow::Hidden,
-                    Overflow::Auto => taffy::Overflow::Scroll,
-                };
-                self.layout.overflow = taffy::geometry::Point { x: value, y: value };
+                let axis = overflow(value);
+                self.layout.overflow = taffy::geometry::Point { x: axis, y: axis };
             }
             Declaration::WhiteSpace(value) => self.whitespace = value,
             Declaration::Foreground(value) => self.visual = self.visual.fg(value),
@@ -279,6 +259,31 @@ fn align(value: Alignment) -> Option<AlignItems> {
         Alignment::End => Some(AlignItems::FlexEnd),
         Alignment::Center => Some(AlignItems::Center),
         _ => Some(AlignItems::Stretch),
+    }
+}
+fn align_self(value: Alignment) -> Option<AlignSelf> {
+    align(value).map(|value| match value {
+        AlignItems::FlexStart => AlignSelf::FlexStart,
+        AlignItems::FlexEnd => AlignSelf::FlexEnd,
+        AlignItems::Center => AlignSelf::Center,
+        _ => AlignSelf::Stretch,
+    })
+}
+fn justify(value: Alignment) -> JustifyContent {
+    match value {
+        Alignment::Center => JustifyContent::Center,
+        Alignment::End => JustifyContent::FlexEnd,
+        Alignment::SpaceBetween => JustifyContent::SpaceBetween,
+        Alignment::SpaceAround => JustifyContent::SpaceAround,
+        Alignment::SpaceEvenly => JustifyContent::SpaceEvenly,
+        _ => JustifyContent::FlexStart,
+    }
+}
+fn overflow(value: Overflow) -> taffy::Overflow {
+    match value {
+        Overflow::Visible => taffy::Overflow::Visible,
+        Overflow::Hidden => taffy::Overflow::Hidden,
+        Overflow::Auto => taffy::Overflow::Scroll,
     }
 }
 
