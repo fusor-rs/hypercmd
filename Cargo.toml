@@ -1,6 +1,6 @@
 [workspace]
 members = ["crates/hypercmd", "crates/hypercmd-build", "crates/hypercmd-cli", "examples/file-browser", "examples/job-inspector", "examples/job-controls"]
-exclude = ["tests/consumer", "tests/browser-consumer"]
+exclude = ["tests/consumer", "tests/browser-consumer", "apps"]
 resolver = "2"
 
 [workspace.package]

@@ -1,7 +1,7 @@
 default:
     @just --list
 
-check: lint consumer cli packages msrv
+check: lint consumer cli packages msrv landing-check docs-check
 
 # A new app from the CLI must check cleanly against this checkout.
 cli:
@@ -17,6 +17,7 @@ fetch:
     cargo fetch --locked
     cargo fetch --manifest-path tests/consumer/Cargo.toml --locked
     cargo fetch --manifest-path tests/browser-consumer/Cargo.toml --locked
+    cargo fetch --manifest-path apps/Cargo.toml --locked
 
 consumer:
     cargo test --manifest-path tests/consumer/Cargo.toml --locked
@@ -39,6 +40,54 @@ browser:
     cargo clippy --manifest-path tests/browser-consumer/Cargo.toml --target wasm32-unknown-unknown --locked -- -D warnings
     cargo clippy -p hypercmd-job-controls --no-default-features --features browser --target wasm32-unknown-unknown --locked -- -D warnings
     node scripts/browser.mjs
+    just landing-browser
+    just docs-browser
+    just site-browser
+
+[working-directory: "apps"]
+site:
+    {{env_var_or_default("FUSOR_BIN", "fusor")}} build --site --locked
+
+preview port="4187":
+    {{env_var_or_default("FUSOR_BIN", "fusor")}} preview apps/dist --port {{port}}
+
+[unix]
+deploy environment="production":
+    @case "{{environment}}" in production|preview) ;; *) echo "deploy: expected production or preview, got {{environment}}" >&2; exit 2 ;; esac
+    vercel build {{ if environment == "production" { "--prod" } else { "" } }} --yes
+    find .vercel/output/static -name '.fusor-*.json' -delete
+    vercel deploy --prebuilt {{ if environment == "production" { "--prod" } else { "" } }} --yes
+
+site-browser:
+    node scripts/site.mjs
+
+docs-check:
+    cargo fmt --manifest-path apps/docs/Cargo.toml -- --check
+    cargo clippy --manifest-path apps/docs/Cargo.toml --all-targets --locked -- -D warnings
+    cargo +1.85 check --manifest-path apps/docs/Cargo.toml --locked
+
+docs:
+    {{env_var_or_default("FUSOR_BIN", "fusor")}} build --manifest-path apps/docs/Cargo.toml --locked
+
+docs-dev:
+    {{env_var_or_default("FUSOR_BIN", "fusor")}} dev --manifest-path apps/docs/Cargo.toml
+
+docs-browser:
+    node scripts/docs.mjs
+
+landing-check:
+    cargo fmt --manifest-path apps/landing/Cargo.toml -- --check
+    cargo clippy --manifest-path apps/landing/Cargo.toml --all-targets --locked -- -D warnings
+    cargo +1.85 check --manifest-path apps/landing/Cargo.toml --locked
+
+landing:
+    {{env_var_or_default("FUSOR_BIN", "fusor")}} build --manifest-path apps/landing/Cargo.toml --locked
+
+landing-dev:
+    {{env_var_or_default("FUSOR_BIN", "fusor")}} dev --manifest-path apps/landing/Cargo.toml
+
+landing-browser:
+    node scripts/landing.mjs
 
 setup-browser:
     rustup target add wasm32-unknown-unknown

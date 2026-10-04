@@ -1,0 +1,37 @@
+.demo {
+  padding: 1ch;
+  gap: 1ch;
+  border-style: rounded;
+}
+.actions, .panels {
+  flex-direction: row;
+  gap: 1ch;
+}
+button {
+  min-width: 7ch;
+  border-style: solid;
+}
+label {
+  gap: 1ch;
+}
+input {
+  width: 24ch;
+}
+.results {
+  height: 5ch;
+  overflow: hidden;
+}
+.panels.stacked {
+  flex-direction: column;
+}
+.box {
+  flex-grow: 1;
+  padding: 1ch;
+  border-style: rounded;
+}
+.menu {
+  gap: 1ch;
+}
+.chosen {
+  border-style: rounded;
+}

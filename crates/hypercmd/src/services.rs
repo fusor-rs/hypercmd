@@ -20,11 +20,15 @@ use std::{
         atomic::{AtomicBool, AtomicUsize, Ordering},
     },
     task::{Context, Poll, Wake, Waker},
-    time::{Duration, Instant},
+    time::Duration,
 };
 
 #[cfg(any(feature = "native", test))]
 use futures_util::stream::Stream;
+#[cfg(not(all(target_family = "wasm", target_os = "unknown")))]
+use std::time::Instant;
+#[cfg(all(target_family = "wasm", target_os = "unknown"))]
+use web_time::Instant;
 
 #[cfg(any(feature = "native", test))]
 const COMPLETIONS_PER_TURN: usize = 32;

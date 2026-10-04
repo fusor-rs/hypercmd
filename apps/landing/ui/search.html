@@ -1,0 +1,17 @@
+<template rust:component="Search">
+  <main class="demo">
+    <h1>Search project files</h1>
+    <p>Snapshot: apps/landing</p>
+
+    <label>Find <input bind="state.query"
+      placeholder="Find files" /></label>
+
+    <ul class="results">
+      <ForEach items="{{ state.matches() }}"
+        key="{{ |file| file.path }}">
+        <li>{{ item.get().path }}</li>
+      </ForEach>
+    </ul>
+    <p>{{ state.matches().len() }} matches · first 5</p>
+  </main>
+</template>

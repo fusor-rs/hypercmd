@@ -1,0 +1,11 @@
+[
+  { "slug": "", "group": "Learn" },
+  { "slug": "cli", "group": "Reference", "reference": true },
+  { "slug": "profile", "group": "Reference", "reference": true },
+  { "slug": "controls", "group": "Reference", "reference": true },
+  { "slug": "async", "group": "Learn" },
+  { "slug": "routing", "group": "Learn" },
+  { "slug": "services", "group": "Learn" },
+  { "slug": "native", "group": "Reference", "reference": true },
+  { "slug": "consumption", "group": "Learn" }
+]

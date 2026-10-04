@@ -1,0 +1,45 @@
+name: Deploy site
+on:
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: Deploy to production or a preview URL
+        type: choice
+        options: [production, preview]
+        default: production
+
+permissions:
+  contents: read
+
+concurrency:
+  group: deploy-site
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    environment: vercel
+    env:
+      VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+      VERCEL_ORG_ID: team_hpDr5Biqje4Idy2xKGjdDRsn
+      VERCEL_PROJECT_ID: prj_mZT9IE4DA026iIKAAinEH5rblXj6
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: apps -> target
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: just
+      - run: cargo install fusor-cli --version 0.1.4 --locked
+      - run: fusor install --manifest-path apps/Cargo.toml -p hypercmd-docs --locked
+      - run: npm install --global vercel@59.23.2
+      - run: vercel pull --yes --environment=${{ inputs.environment }}
+      - run: just deploy ${{ inputs.environment }}

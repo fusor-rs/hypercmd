@@ -1,6 +1,12 @@
 /target/
 **/target/
 node_modules/
-tests/browser-consumer/dist/
+dist/
 .idea
 .idea/
+.fusor/
+.fusor-stage-*/
+.vercel/
+.env*
+.DS_Store
+test-results/

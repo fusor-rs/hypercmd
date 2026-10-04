@@ -1,0 +1,20 @@
+[workspace]
+members = ["landing", "docs"]
+resolver = "2"
+
+[workspace.metadata.fusor.site]
+output = "dist"
+
+[workspace.metadata.fusor.site.mounts]
+"/" = "hypercmd-landing"
+"/docs/" = "hypercmd-docs"
+
+[profile.dev]
+debug = 0
+
+[profile.release]
+opt-level = 3
+lto = true
+codegen-units = 1
+panic = "abort"
+strip = "debuginfo"

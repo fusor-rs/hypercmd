@@ -1,0 +1,4 @@
+/target/
+/dist/
+/public/brand/
+/public/*.html
