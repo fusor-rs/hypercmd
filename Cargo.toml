@@ -4,7 +4,7 @@ exclude = ["tests/consumer", "tests/browser-consumer", "apps"]
 resolver = "2"
 
 [workspace.package]
-version = "0.1.1"
+version = "0.1.2"
 edition = "2024"
 rust-version = "1.85"
 license = "MIT"
@@ -35,19 +35,19 @@ struct_excessive_bools = "deny"
 excessive_nesting = "deny"
 
 [workspace.dependencies]
-hypercmd = { path = "crates/hypercmd", version = "=0.1.1", default-features = false }
-hypercmd-build = { path = "crates/hypercmd-build", version = "=0.1.1" }
-hypercmd-job-controls = { path = "examples/job-controls", version = "=0.1.1" }
+hypercmd = { path = "crates/hypercmd", version = "=0.1.2", default-features = false }
+hypercmd-build = { path = "crates/hypercmd-build", version = "=0.1.2" }
+hypercmd-job-controls = { path = "examples/job-controls", version = "=0.1.2" }
 portable-pty = "=0.9.0"
 rustix = "=1.1.4"
 tempfile = "=3.23.0"
-fusor = { package = "fusor-core", version = "=0.1.4", default-features = false }
-fusor-build = { version = "=0.1.4" }
-fusor-components = { version = "=0.1.4", default-features = false }
-fusor-router = { version = "=0.1.4", default-features = false }
-fusor-async = { version = "=0.1.4", default-features = false }
-fusor-test = { version = "=0.1.4", default-features = false }
-fusor-std = { version = "=0.1.4", default-features = false }
+fusor = { package = "fusor-core", version = "=0.1.5", default-features = false }
+fusor-build = { version = "=0.1.5" }
+fusor-components = { version = "=0.1.5", default-features = false }
+fusor-router = { version = "=0.1.5", default-features = false }
+fusor-async = { version = "=0.1.5", default-features = false }
+fusor-test = { version = "=0.1.5", default-features = false }
+fusor-std = { version = "=0.1.5", default-features = false }
 proc-macro2 = "1.0.103"
 quote = "1.0.42"
 syn = { version = "2.0.111", features = ["full"] }

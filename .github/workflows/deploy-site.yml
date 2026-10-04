@@ -39,7 +39,7 @@ jobs:
       - uses: taiki-e/install-action@v2
         with:
           tool: just
-      - run: cargo install fusor-cli --version 0.1.4 --locked
+      - run: cargo install fusor-cli --version 0.1.5 --locked
       - run: fusor install --manifest-path apps/Cargo.toml -p hypercmd-docs --locked
       - run: npm install --global vercel@59.23.2
       - run: vercel pull --yes --environment=${{ inputs.environment }}

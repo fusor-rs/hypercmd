@@ -41,7 +41,7 @@ The workflow caches Cargo downloads and installed tools, but not `apps/target`: 
 cache action removes Fusor's ownership manifests from site staging directories.
 
 For a local deployment, install the site prerequisites with
-`cargo install fusor-cli --version 0.1.4 --locked` and
+`cargo install fusor-cli --version 0.1.5 --locked` and
 `fusor install --manifest-path apps/Cargo.toml -p hypercmd-docs --locked`.
 Install Vercel CLI 59.23.2, then run `vercel login` and
 `vercel link --yes --scope pirela --project hypercmd` once. Run
@@ -72,7 +72,14 @@ linked) and macOS (Apple Silicon and Intel), installs each archive with
 `install.sh` and creates a new app with it. Once every platform passes, it
 attaches the archives and their `.sha256` checksums to the release, checks that
 the tag matches the version, runs `just check` and a dry run, and publishes to
-crates.io. Rerunning a stopped release skips crates already published.
+crates.io. After both uploads and crate publication succeed, it attaches `install.sh`.
+The CLI treats that final asset as the release readiness signal for upgrades and
+version notifications. Rerunning a stopped release skips crates already published.
+
+The CLI embeds the root installer through `crates/hypercmd-cli/install.sh`, a symlink
+that Cargo flattens into the package archive. Edit the root script. `just cli` exercises
+upgrades between two builds of the real CLI using local release archives and an HTTP
+fixture selected by `HYPERCMD_RELEASE_URL` and `HYPERCMD_DOWNLOAD_BASE`.
 
 To try the binaries without releasing, run the `Release` workflow by hand from
 the Actions tab; it keeps the archives as workflow artifacts and publishes

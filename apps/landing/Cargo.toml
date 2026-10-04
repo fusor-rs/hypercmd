@@ -1,6 +1,6 @@
 [package]
 name = "hypercmd-landing"
-version = "0.1.1"
+version = "0.1.2"
 edition = "2024"
 rust-version = "1.85"
 publish = false
@@ -9,16 +9,16 @@ publish = false
 crate-type = ["cdylib", "rlib"]
 
 [dependencies]
-fusor = { package = "fusor-core", version = "=0.1.4", features = ["dom", "derive"] }
-fusor-components = { version = "=0.1.4", features = ["browser"] }
+fusor = { package = "fusor-core", version = "=0.1.5", features = ["dom", "derive"] }
+fusor-components = { version = "=0.1.5", features = ["browser"] }
 hypercmd = { path = "../../crates/hypercmd", default-features = false }
 wasm-bindgen = "=0.2.117"
 wasm-bindgen-futures = "=0.4.67"
 web-sys = { version = "=0.3.94", features = ["Window", "Navigator", "Clipboard", "HtmlInputElement"] }
 
 [build-dependencies]
-docs-base-build = { git = "https://github.com/fusor-rs/docs-base", rev = "e2c7b3939721002ea2aa7556d8e4409aa131472b" }
-fusor-build = "=0.1.4"
+docs-base-build = { git = "https://github.com/fusor-rs/docs-base", rev = "78990c2b07d510abc76224e82ca933f89f423850" }
+fusor-build = "=0.1.5"
 hypercmd-build = { path = "../../crates/hypercmd-build" }
 quote = "=1.0.47"
 

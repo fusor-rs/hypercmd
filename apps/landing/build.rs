@@ -42,7 +42,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     highlighted_examples()?;
     project_files()?;
     hypercmd_build::compile_app()?;
-    fusor_build::compile_app()
+    fusor_build::compile_app()?;
+    Ok(())
 }
 
 fn highlighted_examples() -> Result<(), Box<dyn std::error::Error>> {

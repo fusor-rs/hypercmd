@@ -82,6 +82,9 @@ curl -fsSL https://raw.githubusercontent.com/fusor-rs/hypercmd/main/install.sh |
 
 The installer downloads the latest release, verifies its checksum, and puts `hypercmd` in `.hypercmd/bin` under your home directory; it prints the line to add to your `PATH`. The script is [install.sh](install.sh) if you want to read it first. With Rust installed, `cargo install hypercmd-cli` works too.
 
+Run `hypercmd upgrade` to upgrade the CLI. Interactive commands warn when a newer
+release is available, checking at most once a day. See [CLI upgrades](docs/cli.md#hypercmd-upgrade).
+
 Create and run an app:
 
 ```sh
@@ -100,12 +103,12 @@ again. See the [CLI reference](docs/cli.md) for commands and options.
 
 ```toml
 [dependencies]
-hypercmd = "=0.1.1"
-fusor = { package = "fusor-core", version = "=0.1.4", default-features = false }
-fusor-components = { version = "=0.1.4", default-features = false }
+hypercmd = "=0.1.2"
+fusor = { package = "fusor-core", version = "=0.1.5", default-features = false }
+fusor-components = { version = "=0.1.5", default-features = false }
 
 [build-dependencies]
-hypercmd-build = "=0.1.1"
+hypercmd-build = "=0.1.2"
 
 [package.metadata.hypercmd]
 entry = "ui/app.html"        # the <App> template

@@ -28,5 +28,6 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     )?;
     println!("cargo:rerun-if-changed=../../assets/brand/hypercmd.svg");
     fs::copy(root.join("assets/brand/hypercmd.svg"), "public/favicon.svg")?;
-    fusor_build::compile_app()
+    fusor_build::compile_app()?;
+    Ok(())
 }

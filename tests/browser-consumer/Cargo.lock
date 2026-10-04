@@ -180,9 +180,9 @@ dependencies = [
 
 [[package]]
 name = "fusor-async"
-version = "0.1.4"
+version = "0.1.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "804497a690960b93fe23366f41f968d923e60e9025eee19180e9d63f2a7d70d2"
+checksum = "646fff2a46bb22563d2803c7bb2d47d606a63b4d1ae087a17e88535271ec5739"
 dependencies = [
  "derive-where",
  "fusor-core",
@@ -191,9 +191,9 @@ dependencies = [
 
 [[package]]
 name = "fusor-build"
-version = "0.1.4"
+version = "0.1.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "61e853f1efe0a7a43a69c1b0ba429a65e3fb2b059a9839522bea725452a325d5"
+checksum = "9519b7630353b2f0d12255e4a94a102b0ab0d973623b138a5a6b4d8d8744d6b5"
 dependencies = [
  "fusor-core",
  "fusor-islands",
@@ -210,18 +210,18 @@ dependencies = [
 
 [[package]]
 name = "fusor-components"
-version = "0.1.4"
+version = "0.1.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "4ff376904a2eadb6a540744719429734482d2e736a0773377d9853fe170613f5"
+checksum = "b2fccd168a90d8d305d3c1cbcd5240cbf6c7642bd7e6d1cad82cd25be5f0a2d6"
 dependencies = [
  "fusor-core",
 ]
 
 [[package]]
 name = "fusor-core"
-version = "0.1.4"
+version = "0.1.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "36cc8392e17b5eea5f45606a51bb8736042bd19175f20fb63ee82fc1787561eb"
+checksum = "99e9a5d9f8a49db0ed7132c1c8061c16797a97ec1fdfac621b25e39fa24d1c7c"
 dependencies = [
  "fusor-macros",
  "js-sys",
@@ -231,9 +231,9 @@ dependencies = [
 
 [[package]]
 name = "fusor-islands"
-version = "0.1.4"
+version = "0.1.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "09040f3dfaa95e41e54a4ba1005a88e017910b0eceee4e700c5f04be3c47ce22"
+checksum = "74305bb3cb2e04df2c6ba06e13cbe536aca92046e61377eee4142e8dfd2eddd8"
 dependencies = [
  "fusor-core",
  "serde",
@@ -242,9 +242,9 @@ dependencies = [
 
 [[package]]
 name = "fusor-macros"
-version = "0.1.4"
+version = "0.1.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ebdbd0919aeab94a1589b0952a9711e7d46aab3123a0c2c02ba3b0683d814490"
+checksum = "7116a1002c31d1027dd6da5844b8133b5d81c098c6720567c5cd8b8f8e5245d8"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -253,9 +253,9 @@ dependencies = [
 
 [[package]]
 name = "fusor-router"
-version = "0.1.4"
+version = "0.1.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1cbb73da8ceba9583442a661d65d9d1256ee2863a55ee1ec95f8e5d4b4507070"
+checksum = "e86cf63dfe536faf9cb7b4d7ecfd0f3da3abaf005e9551889be82c4ea64982d9"
 dependencies = [
  "form_urlencoded",
  "fusor-core",
@@ -342,7 +342,7 @@ checksum = "428502d3ec1742c35e015871aef742bc4722a9acfcb616b8ff79b519922e1c36"
 
 [[package]]
 name = "hypercmd"
-version = "0.1.1"
+version = "0.1.2"
 dependencies = [
  "fusor-async",
  "fusor-core",
@@ -371,7 +371,7 @@ dependencies = [
 
 [[package]]
 name = "hypercmd-build"
-version = "0.1.1"
+version = "0.1.2"
 dependencies = [
  "fusor-build",
  "proc-macro2",
@@ -383,7 +383,7 @@ dependencies = [
 
 [[package]]
 name = "hypercmd-job-controls"
-version = "0.1.1"
+version = "0.1.2"
 dependencies = [
  "fusor-build",
  "fusor-components",
