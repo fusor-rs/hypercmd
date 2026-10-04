@@ -16,6 +16,7 @@ pub(crate) struct Scene {
     pub faulted: Cell<bool>,
     pub requested_focus: RefCell<std::rc::Weak<NodeData>>,
     pub route_focus: RefCell<std::rc::Weak<NodeData>>,
+    pub edit_limit: Cell<Option<usize>>,
 }
 
 impl Scene {

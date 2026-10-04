@@ -1,7 +1,9 @@
 <template rust:component="Workspace">
   <main on:keydown="state.shortcut(&event)">
     <button>Before editor</button>
-    <textarea id="multiline" autofocus bind="state.draft"></textarea>
+    <textarea id="multiline" autofocus bind="state.draft"
+              on:keydown="state.complete(&event)"
+              on:select="state.selection.set(event.target.editor().cursor)"></textarea>
     <section id="viewport" tabindex="0" on:resize="state.resized(&event)">
       <pre>first
 second

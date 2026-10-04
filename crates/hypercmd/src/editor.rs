@@ -1,6 +1,6 @@
-use crate::{Error, Key, Modifiers, Node, text};
+use crate::{Error, ErrorKind, Key, Modifiers, Node, text};
 use ratatui::{buffer::Buffer, layout::Rect, style::Modifier};
-use std::ops::RangeBounds;
+use std::ops::{Range, RangeBounds};
 use unicode_segmentation::UnicodeSegmentation;
 
 /// Byte offsets refer to extended grapheme boundaries; scroll offsets are terminal cells.
@@ -43,33 +43,72 @@ fn next_boundary(value: &str, cursor: usize) -> usize {
         .unwrap_or(value.len())
 }
 
-pub(crate) fn insert(node: &Node, inserted: &str, limit: usize) -> Result<(), Error> {
-    if !node.is_interactive() || node.attribute("readonly").is_some() {
-        return Ok(());
+impl Node {
+    /// Byte bounds must be extended-grapheme boundaries. The caret follows the inserted text.
+    /// Emits `input`; invalid bounds or exceeding the controller's edit limit
+    /// leave the draft unchanged.
+    pub fn replace_range(&self, range: Range<usize>, inserted: &str) -> Result<(), Error> {
+        if !self.is_editor() {
+            return Err(Error::new(
+                ErrorKind::Edit,
+                "text replacement requires a text control",
+            ));
+        }
+        if !self.is_interactive() || self.is_disabled() || self.attribute("readonly").is_some() {
+            return Ok(());
+        }
+        let mut value = self.value();
+        if range.start > range.end
+            || !boundaries(&value).any(|offset| offset == range.start)
+            || !boundaries(&value).any(|offset| offset == range.end)
+        {
+            return Err(Error::new(
+                ErrorKind::Edit,
+                "text replacement bounds must be ordered grapheme boundaries within the draft",
+            ));
+        }
+        let limit = self
+            .0
+            .scene
+            .edit_limit
+            .get()
+            .unwrap_or(crate::controls::EDIT_LIMIT);
+        if value.len() - range.len() + inserted.len() > limit {
+            return Err(Error::limit("edited value exceeds configured byte limit"));
+        }
+        value.replace_range(range.clone(), inserted);
+        let mut editor = self.editor();
+        editor.cursor = boundary(&value, ..=range.start + inserted.len());
+        editor.anchor = None;
+        self.0.editor.replace(editor);
+        self.edit(value)
     }
-    let mut value = node.value();
-    let mut editor = node.clamped_editor(&value);
-    let selection = editor.selection();
-    if value.len() - selection.len() + inserted.len() > limit {
-        return Err(Error::limit("edited value exceeds configured byte limit"));
+
+    fn select(&self, editor: EditorState) -> Result<(), Error> {
+        let previous = self.0.editor.replace(editor);
+        if previous.cursor != editor.cursor || previous.anchor != editor.anchor {
+            self.0.scene.changed();
+            self.dispatch("select")?;
+        }
+        Ok(())
     }
-    value.replace_range(selection.clone(), inserted);
-    editor.cursor = boundary(&value, ..=selection.start + inserted.len());
-    editor.anchor = None;
-    node.0.editor.replace(editor);
-    node.edit(value)
 }
 
-pub(crate) fn key(node: &Node, key: Key, modifiers: Modifiers, limit: usize) -> Result<(), Error> {
+pub(crate) fn insert(node: &Node, inserted: &str) -> Result<(), Error> {
+    let selection = node.editor().selection();
+    node.replace_range(selection, inserted)
+}
+
+pub(crate) fn key(node: &Node, key: Key, modifiers: Modifiers) -> Result<(), Error> {
     if modifiers.alt {
         return Ok(());
     }
     if !modifiers.control {
         match key {
             Key::Char(character) if !character.is_control() => {
-                return insert(node, &character.to_string(), limit);
+                return insert(node, &character.to_string());
             }
-            Key::Enter if node.tag() == "textarea" => return insert(node, "\n", limit),
+            Key::Enter if node.tag() == "textarea" => return insert(node, "\n"),
             Key::Backspace | Key::Delete => return erase(node, key),
             _ => {}
         }
@@ -87,9 +126,7 @@ pub(crate) fn key(node: &Node, key: Key, modifiers: Modifiers, limit: usize) -> 
     } else {
         return Ok(());
     }
-    node.0.editor.replace(editor);
-    node.0.scene.changed();
-    Ok(())
+    node.select(editor)
 }
 
 fn destination(
@@ -137,6 +174,33 @@ fn erase(node: &Node, key: Key) -> Result<(), Error> {
     editor.anchor = None;
     node.0.editor.replace(editor);
     node.edit(value)
+}
+
+pub(crate) fn place_cursor(node: &Node, position: (usize, usize)) -> Result<(), Error> {
+    let value = node.value();
+    let mut editor = node.clamped_editor(&value);
+    let target = (position.0 + editor.scroll, position.1 + editor.scroll_row);
+    let mut column = 0;
+    let mut row = 0;
+    editor.cursor = value.len();
+    editor.anchor = None;
+    for (index, cluster) in value.grapheme_indices(true) {
+        if node.tag() == "textarea" && matches!(cluster, "\n" | "\r" | "\r\n") {
+            if row == target.1 {
+                editor.cursor = index;
+                break;
+            }
+            row += 1;
+            column = 0;
+            continue;
+        }
+        column += cluster_width(cluster, column);
+        if row == target.1 && column > target.0 {
+            editor.cursor = index;
+            break;
+        }
+    }
+    node.select(editor)
 }
 
 fn line_range(value: &str, cursor: usize) -> std::ops::Range<usize> {

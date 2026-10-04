@@ -75,7 +75,6 @@ pub struct Controller {
     order: Vec<Node>,
     scrolls: ScrollState,
     paste_limit: usize,
-    edit_limit: usize,
 }
 
 impl Controller {
@@ -87,12 +86,11 @@ impl Controller {
             order: Vec::new(),
             scrolls: ScrollState::default(),
             paste_limit: PASTE_LIMIT,
-            edit_limit: EDIT_LIMIT,
         }
     }
     pub fn set_limits(&mut self, paste_bytes: usize, edit_bytes: usize) {
         self.paste_limit = paste_bytes;
-        self.edit_limit = edit_bytes;
+        self.root.0.scene.edit_limit.set(Some(edit_bytes));
     }
     pub fn focus(&self) -> Option<Node> {
         self.focus.clone()
@@ -326,7 +324,7 @@ impl Controller {
                 }
                 if let Some(node) = self.focus.as_ref().filter(|node| node.is_editor()) {
                     let value = crate::text::sanitize(&value, node.tag() == "textarea");
-                    crate::editor::insert(node, &value, self.edit_limit)?;
+                    crate::editor::insert(node, &value)?;
                 }
             }
             Input::Click { column, row } => self.click(column, row)?,
@@ -406,10 +404,10 @@ impl Controller {
         if kind == KeyKind::Release {
             return Ok(());
         }
-        if key == Key::Tab && !modifiers.control && !modifiers.alt && !modifiers.super_key {
-            return self.tab(modifiers.shift);
-        }
         let Some(node) = self.focus.clone().filter(Node::is_interactive) else {
+            if key == Key::Tab && !modifiers.control && !modifiers.alt && !modifiers.super_key {
+                return self.tab(modifiers.shift);
+            }
             return Ok(());
         };
         if self.bubble(
@@ -424,6 +422,9 @@ impl Controller {
         {
             return Ok(());
         }
+        if key == Key::Tab && !modifiers.control && !modifiers.alt {
+            return self.tab(modifiers.shift);
+        }
         if matches!(key, Key::PageUp | Key::PageDown) && !modifiers.control && !modifiers.alt {
             self.page_viewport_containing(&node, key == Key::PageUp);
             return Ok(());
@@ -436,7 +437,7 @@ impl Controller {
             return self.vertical(key == Key::Up);
         }
         if node.is_editor() {
-            return crate::editor::key(&node, key, modifiers, self.edit_limit);
+            return crate::editor::key(&node, key, modifiers);
         }
         if modifiers.control || modifiers.alt {
             return Ok(());
@@ -551,7 +552,28 @@ impl Controller {
             if self.focus.as_ref() != Some(&target) || !self.focusable(&target) {
                 return Ok(());
             }
+            if target.is_editor() {
+                self.place_cursor(&target, column, row)?;
+            }
             activate(&target)?;
+        }
+        Ok(())
+    }
+
+    fn place_cursor(&self, node: &Node, column: u16, row: u16) -> Result<(), Error> {
+        if let Some(entry) = self.presentation.as_ref().and_then(|presentation| {
+            presentation
+                .entries
+                .iter()
+                .find(|entry| entry.node == *node)
+        }) {
+            crate::editor::place_cursor(
+                node,
+                (
+                    usize::from(column.saturating_sub(entry.content.x)),
+                    usize::from(row.saturating_sub(entry.content.y)),
+                ),
+            )?;
         }
         Ok(())
     }

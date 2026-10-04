@@ -12,6 +12,7 @@ pub enum ErrorKind {
     Service,
     Disposed,
     Limit,
+    Edit,
     Terminal,
 }
 
