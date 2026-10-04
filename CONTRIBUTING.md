@@ -37,6 +37,8 @@ The **Deploy site** workflow builds the landing page and docs with Rust, then
 uploads prebuilt files to the Pirela team's `hypercmd` project on Vercel. Run it
 from the Actions tab and choose production or preview. Pushes do not deploy.
 Vercel's build machines do not provide the Rust toolchain this site needs.
+The workflow caches Cargo downloads and installed tools, but not `apps/target`: the
+cache action removes Fusor's ownership manifests from site staging directories.
 
 For a local deployment, install the site prerequisites with
 `cargo install fusor-cli --version 0.1.4 --locked` and
