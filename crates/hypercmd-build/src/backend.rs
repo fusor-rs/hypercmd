@@ -25,7 +25,7 @@ pub mod profile {
     pub const EVENTS: &[(&str, &[&str])] = &[
         ("*", &["keydown", "scroll", "resize", "focus", "blur"]),
         ("button", &["click"]),
-        ("text", &["input"]),
+        ("text", &["input", "select"]),
         ("checkbox", &["change"]),
     ];
 }
@@ -127,7 +127,8 @@ impl Backend for HypercmdBackend {
         } else {
             Err(origin.error(
                 "terminal-v1 rejects this binding/control pair; use click on button, \
-                 input on a text control, change on checkbox, or keydown/scroll/resize/focus/blur",
+                 input/select on a text control, change on checkbox, \
+                 or keydown/scroll/resize/focus/blur",
             ))
         }
     }

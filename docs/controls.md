@@ -43,10 +43,20 @@ Model writes do not synthesize input/change. Bindings precede authored listeners
 and each listener runs in one reactive batch. Handlers may return `()` or
 `Result<(), Error>`; returned errors enter the scene's diagnostic window.
 Direct events are `click` on buttons, `input` on text controls, `change` on
-checkboxes, and `focus`/`blur`. `keydown` and `scroll` visit the focused or
+checkboxes, and `focus`/`blur`. Text controls emit `select` when keyboard or
+pointer gestures change the caret or selection without editing the draft.
+`keydown` and `scroll` visit the focused or
 hit-tested target followed by its presented ancestors. `event.prevent_default()`
-stops ancestor handlers and the default gesture. Tab retains the controller's
-focus traversal; key releases do not dispatch `keydown`.
+stops ancestor handlers and the default gesture, including Tab focus traversal.
+Key releases do not dispatch `keydown`.
+
+`Node::editor()` exposes the caret and selection as UTF-8 byte offsets at extended
+grapheme boundaries. `Node::replace_range(range, text)` replaces that byte range,
+clears the selection, and places the caret after the insertion before emitting
+`input`. Invalid boundaries and edits exceeding the controller's configured byte
+limit return an error without changing the draft. Read-only and disabled controls
+ignore replacements. Mouse clicks place the caret using the presented content box
+and retained editor scroll offsets.
 
 `EventPayload::Input` carries the normalized `Input`, including `Modifiers`
 (`shift`, `control`, `alt`, `super_key`) and vertical/horizontal scroll deltas.

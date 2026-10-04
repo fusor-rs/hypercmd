@@ -1,5 +1,8 @@
 use fusor::{FromInputs, Signal, signal};
-use hypercmd::{Controller, Event, EventPayload, Input, Key, KeyKind, Modifiers, Scope};
+use hypercmd::{
+    Controller, Error, ErrorKind, Event, EventPayload, Input, Key, KeyKind, Modifiers, Scope,
+};
+use std::ops::Range;
 
 #[derive(FromInputs)]
 struct Workspace {
@@ -9,9 +12,29 @@ struct Workspace {
     runs: Signal<usize>,
     #[input]
     size: Signal<(u16, u16)>,
+    #[input]
+    selection: Signal<usize>,
+    #[input]
+    completion: Signal<Option<Range<usize>>>,
 }
 
 impl Workspace {
+    fn complete(&self, event: &Event) -> Result<(), Error> {
+        let EventPayload::Input(Input::Key {
+            key: Key::Tab,
+            modifiers: Modifiers { shift: false, .. },
+            ..
+        }) = event.payload
+        else {
+            return Ok(());
+        };
+        if let Some(range) = self.completion.get() {
+            event.target.replace_range(range, "café")?;
+            self.completion.set(None);
+            event.prevent_default();
+        }
+        Ok(())
+    }
     fn shortcut(&self, event: &Event) {
         let EventPayload::Input(Input::Key { key, modifiers, .. }) = event.payload else {
             return;
@@ -44,10 +67,14 @@ fn multiline_editor_and_scrollable_workspace_preserve_input_and_focus() {
     let draft = signal(String::new());
     let runs = signal(0);
     let size = signal((0, 0));
+    let selection = signal(usize::MAX);
+    let completion = signal(None);
     let scope = hypercmd::mount::<Workspace>(WorkspaceInputs {
         draft: draft.clone(),
         runs: runs.clone(),
         size: size.clone(),
+        selection: selection.clone(),
+        completion: completion.clone(),
     })
     .unwrap();
     scope.publish();
@@ -81,6 +108,7 @@ fn multiline_editor_and_scrollable_workspace_preserve_input_and_focus() {
     single_line_draft(&scope, &mut controls);
     authored_focus_replaces_reverse_video(&scope, &mut controls);
     link_destinations(&scope, &mut controls, &draft);
+    editor_completions(&scope, &mut controls, &selection, &completion);
     assert_eq!(hypercmd::text::ellipsize("東京👩‍💻abcdef", 7), "東京👩‍💻…");
     assert_eq!(scope.take_errors().len(), 0);
 }
@@ -271,4 +299,69 @@ fn authored_focus_replaces_reverse_video(scope: &Scope, controls: &mut Controlle
         let cell = &frame.buffer[(entry.content.x, entry.content.y)];
         assert_eq!(format!("{:?}", cell.modifier), expected);
     }
+}
+
+fn editor_completions(
+    scope: &Scope,
+    controls: &mut Controller,
+    selection: &Signal<usize>,
+    completion: &Signal<Option<Range<usize>>>,
+) {
+    let editor = scope.root().find("multiline").unwrap();
+    editor.edit("SELECT 東京").unwrap();
+    controls.set_focus(&editor).unwrap();
+    super::key(controls, Key::End, false);
+    super::key(controls, Key::Left, false);
+    assert_eq!(selection.get(), 10);
+    completion.set(Some(7..13));
+    super::key(controls, Key::Tab, false);
+    assert_eq!(editor.value(), "SELECT café");
+    assert_eq!(editor.editor().cursor, 12);
+    assert_eq!(editor.editor().anchor, None);
+    assert_eq!(controls.focus(), Some(editor.clone()));
+    super::key(controls, Key::Tab, false);
+    assert_eq!(controls.focus(), scope.root().find("viewport"));
+    rejected_replacements(controls, &editor);
+    editor_pointer(scope, controls, selection);
+}
+
+fn rejected_replacements(controls: &mut Controller, editor: &hypercmd::Node) {
+    editor.edit("e\u{301}界").unwrap();
+    for range in [1..3, 3..4, 7..7] {
+        assert_eq!(
+            editor.replace_range(range, "x").unwrap_err().kind,
+            ErrorKind::Edit
+        );
+        assert_eq!(editor.value(), "e\u{301}界");
+    }
+    controls.set_limits(100, 6);
+    assert_eq!(
+        editor.replace_range(0..0, "x").unwrap_err().kind,
+        ErrorKind::Limit
+    );
+    assert_eq!(editor.value(), "e\u{301}界");
+    editor.replace_range(3..6, "Z").unwrap();
+    assert_eq!(editor.value(), "e\u{301}Z");
+    assert_eq!(editor.editor().cursor, 4);
+}
+
+fn editor_pointer(scope: &Scope, controls: &mut Controller, selection: &Signal<usize>) {
+    let editor = scope.root().find("multiline").unwrap();
+    editor.edit("A\n東京").unwrap();
+    controls.set_focus(&editor).unwrap();
+    let frame = super::frame(&scope.root(), controls, (40, 16));
+    let entry = frame
+        .entries
+        .iter()
+        .find(|entry| entry.node == editor)
+        .unwrap();
+    let click = Input::Click {
+        column: entry.content.x + 2,
+        row: entry.content.y + 1,
+    };
+    controls.presented(frame).unwrap();
+    controls.handle(click).unwrap();
+    assert_eq!(selection.get(), 5);
+    super::key(controls, Key::Backspace, false);
+    assert_eq!(editor.value(), "A\n京");
 }
