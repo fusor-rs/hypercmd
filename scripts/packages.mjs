@@ -64,12 +64,12 @@ edition = "2024"
 rust-version = "1.85"
 [workspace]
 [dependencies]
-hypercmd = "=0.1.0"
-hypercmd-job-controls = { version = "=0.1.0", features = ["terminal"] }
+hypercmd = "=0.1.1"
+hypercmd-job-controls = { version = "=0.1.1", features = ["terminal"] }
 fusor = { package = "fusor-core", version = "=0.1.4", default-features = false }
 fusor-components = { version = "=0.1.4", default-features = false }
 [build-dependencies]
-hypercmd-build = "=0.1.0"
+hypercmd-build = "=0.1.1"
 [package.metadata.hypercmd]
 entry = "ui/app.html"
 `);

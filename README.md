@@ -100,12 +100,12 @@ again. See the [CLI reference](docs/cli.md) for commands and options.
 
 ```toml
 [dependencies]
-hypercmd = "=0.1.0"
+hypercmd = "=0.1.1"
 fusor = { package = "fusor-core", version = "=0.1.4", default-features = false }
 fusor-components = { version = "=0.1.4", default-features = false }
 
 [build-dependencies]
-hypercmd-build = "=0.1.0"
+hypercmd-build = "=0.1.1"
 
 [package.metadata.hypercmd]
 entry = "ui/app.html"        # the <App> template

@@ -372,7 +372,7 @@ checksum = "428502d3ec1742c35e015871aef742bc4722a9acfcb616b8ff79b519922e1c36"
 
 [[package]]
 name = "hypercmd"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "fusor-async",
  "fusor-core",
@@ -389,7 +389,7 @@ dependencies = [
 
 [[package]]
 name = "hypercmd-build"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "fusor-build",
  "proc-macro2",
