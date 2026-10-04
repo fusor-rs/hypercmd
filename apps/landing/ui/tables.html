@@ -1,0 +1,20 @@
+<template rust:component="Tables">
+  <main class="demo">
+    <h1>Source files</h1>
+    <button on:click="state.largest_first
+      .update(|sort| *sort = !*sort)">Sort by size</button>
+
+    <table>
+      <thead><tr><th>File</th><th>Bytes</th></tr></thead>
+      <tbody>
+        <ForEach items="{{ state.rows() }}"
+          key="{{ |file| file.path }}">
+          <tr><td>{{ item.get().path }}</td>
+            <td>{{ item.get().bytes }}</td></tr>
+        </ForEach>
+      </tbody>
+    </table>
+
+    <p>HTML table. Terminal cells.</p>
+  </main>
+</template>

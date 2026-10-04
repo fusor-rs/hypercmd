@@ -1,0 +1,162 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="theme-color" content="#faf9f6" />
+    <meta name="description"
+      content="Write CLI applications using plain HTML. Build terminal interfaces with Hypercmd, powered by Rust and Fusor." />
+    <meta property="og:title" content="hypercmd — HTML meets the terminal" />
+    <meta property="og:description"
+      content="Your interface in HTML. Your logic in Rust. Your app in the terminal." />
+    <meta property="og:image" content="/brand/hypercmd-social.png" />
+    <meta property="og:type" content="website" />
+    <title>hypercmd — Write CLI applications using plain HTML</title>
+    <link rel="icon" href="/brand/hypercmd.svg" type="image/svg+xml" />
+    <link rel="stylesheet" href="/landing.css" />
+  </head>
+  <body>
+    <a class="skip-link" href="#main">Skip to content</a>
+    <App state="{{ App::new()? }}">
+      <div class="page">
+        <header class="site-header">
+          <a class="brand" href="/" aria-label="hypercmd home">
+            <img src="/brand/hypercmd-horizontal.svg" alt="hypercmd" width="172" height="33" />
+          </a>
+          <a class="family" href="https://fusor.build/">
+            Part of the fusor family <span aria-hidden="true">↗</span>
+          </a>
+        </header>
+        <main id="main">
+          <section class="hero" aria-labelledby="headline">
+            <p class="eyebrow">
+              <span class="brand-prompt" aria-hidden="true">&gt;_</span> A little HTML. A whole terminal.
+            </p>
+            <h1 id="headline">Write CLI applications<br />using <span>plain HTML</span></h1>
+            <p class="description">Your interface in HTML. Your logic in Rust. Your app in the terminal.</p>
+          </section>
+          <section class="example" aria-label="HTML to terminal demonstration">
+            <div class="example-picker" role="group" aria-label="Choose an example">
+              <ForEach items="{{ EXAMPLES.iter().collect::<Vec<_>>() }}"
+                key="{{ |example| example.kind }}">
+                <button class="example-button" aria-controls="example-studio"
+                  aria-pressed="{{ state.example.get().kind == item.get().kind }}"
+                  on:click="state.example.set(item.get())">{{ item.get().label }}</button>
+              </ForEach>
+            </div>
+            <Showcase example="{{ state.example.get() }}"
+              rust:key="state.example.get().kind"></Showcase>
+            <div class="example-caption">
+              <p>
+                <span aria-hidden="true">↳</span> Same HTML. Real terminal output.
+                <span class="try-it">{{ state.example.get().hint }}</span>
+              </p>
+            </div>
+          </section>
+          <section class="installation" aria-labelledby="install-title">
+            <h2 id="install-title">Make yourself at home in the terminal.</h2>
+            <div class="install-command">
+              <span class="shell-prompt" aria-hidden="true">$</span>
+              <code>{{ INSTALL }}</code>
+              <button class="copy-button" class:copied="state.copy_label.get() == COPY_SUCCESS"
+                on:click="state.copy_install()" aria-label="{{ state.copy_label.get() }}">
+                <img src="/copy.svg" width="17" height="17" alt="" />
+                <span aria-live="polite">{{ state.copy_label.get() }}</span>
+              </button>
+            </div>
+            <p class="install-note">
+              macOS &amp; Linux <span aria-hidden="true">·</span>
+              Rust 1.85+ <span aria-hidden="true">·</span> v0.1, experimental
+            </p>
+            <div class="quick-start">
+              <p>Create your first app:</p>
+              <pre><code>hypercmd new my-app
+cd my-app
+hypercmd run</code></pre>
+              <a href="/docs/cli">CLI reference <span aria-hidden="true">↗</span></a>
+            </div>
+          </section>
+        </main>
+        <footer>
+          <nav aria-label="Quick links">
+            <a href="/docs/">Documentation <span aria-hidden="true">↗</span></a>
+            <span class="link-divider" aria-hidden="true"></span>
+            <a href="https://github.com/fusor-rs/hypercmd">
+              GitHub <span aria-hidden="true">↗</span>
+            </a>
+            <span class="link-divider" aria-hidden="true"></span>
+            <a href="https://x.com/fusor_rs">
+              X <span class="handle">@fusor_rs</span> <span aria-hidden="true">↗</span>
+            </a>
+          </nav>
+          <p>HTML belongs here, too.</p>
+        </footer>
+      </div>
+    </App>
+  </body>
+</html>
+
+<template rust:component="Showcase">
+  <div id="example-studio" class="studio">
+    <section class="editor" aria-label="HTML editor">
+      <div class="pane-heading">
+        <div class="window-controls" aria-hidden="true"><i></i><i></i><i></i></div>
+        <span class="filename"><span class="html-icon" aria-hidden="true">&lt;&gt;</span>
+          {{ state.example.filename }}</span>
+        <span class="pane-label">HTML</span>
+      </div>
+      <pre class="source" tabindex="0"
+        aria-label='{{ format!("{} HTML source", state.example.label) }}'><code>
+        <ForEach items="{{ state.example.lines.to_vec() }}" key="{{ |line| line.number }}">
+          <span class="source-row">
+            <span class="line-number" aria-hidden="true">{{ item.get().number }}</span>
+            <span class="code-line"><ForEach
+              items="{{ item.get().tokens.to_vec() }}" key="{{ |token| token.id }}"
+              ><span style="{{ item.get().style }}">{{ item.get().text }}</span></ForEach></span>
+          </span>
+        </ForEach>
+      </code></pre>
+      <div class="pane-footer">
+        <span><span class="branch" aria-hidden="true">⑂</span> main</span>
+        <span>UTF-8 <span class="footer-dot">·</span> HTML</span>
+      </div>
+    </section>
+    <section class="preview" aria-label="Terminal preview">
+      <div class="pane-heading">
+        <span class="terminal-icon" aria-hidden="true">&gt;_</span>
+        <span>Terminal</span><span class="pane-label">{{ state.example.label }}</span>
+      </div>
+      <div class="terminal-body">
+        <p class="run-command">
+          <span>~/hello-world</span> <span class="shell-prompt">❯</span> hypercmd run
+        </p>
+        <div class="terminal-screen" style='{{ format!("--terminal-columns:{}", COLUMNS) }}'
+          role="group" aria-label='{{ format!("Interactive terminal: {}", state.example.label) }}'>
+          <pre class="terminal-output">{{ state.terminal.frame.get().text }}</pre>
+          <div>
+            <ForEach items="{{ state.terminal.frame.get().buttons.clone() }}"
+              key="{{ |button| button.label.clone() }}">
+              <button class="terminal-control" style="{{ item.get().style }}"
+                aria-label="{{ item.get().label }}"
+                on:click="state.terminal.activate(&item.get().node)"></button>
+            </ForEach>
+          </div>
+          <div>
+            <ForEach items="{{ state.terminal.frame.get().inputs.clone() }}"
+              key="{{ |input| input.label.clone() }}">
+              <input class="terminal-control terminal-input" style="{{ item.get().style }}"
+                aria-label="{{ item.get().label }}" value="{{ item.get().node.value() }}"
+                spellcheck="false" autocomplete="off"
+                on:input="state.terminal.edit(&item.get().node, &event)" />
+            </ForEach>
+          </div>
+        </div>
+        <p class="terminal-error" role="alert">{{ state.terminal.error.get() }}</p>
+      </div>
+      <div class="pane-footer">
+        <span class="runtime-status"><i aria-hidden="true"></i> Native terminal UI</span>
+        <span>Rust + HTML</span>
+      </div>
+    </section>
+  </div>
+</template>

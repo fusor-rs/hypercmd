@@ -1,0 +1,17 @@
+<template rust:component="Boxes">
+  <main class="demo">
+    <h1>A little room to build.</h1>
+
+    <div class="panels" class:stacked="state.stacked.get()">
+      <section class="box"><h2>HTML</h2>
+        <p>Markup.</p></section>
+      <section class="box"><h2>Rust</h2>
+        <p>Behavior.</p></section>
+    </div>
+
+    <button on:click="state.stacked
+      .update(|stacked| *stacked = !*stacked)">
+      Toggle layout
+    </button>
+  </main>
+</template>

@@ -1,0 +1,13 @@
+<template rust:component="Counter">
+  <main class="demo">
+    <h1>Hello, terminal.</h1>
+    <p>HTML outside. Rust inside.</p>
+
+    <p>Count: {{ state.count.get() }}</p>
+
+    <div class="actions">
+      <button on:click="state.add()">+1</button>
+      <button on:click="state.reset()">Reset</button>
+    </div>
+  </main>
+</template>

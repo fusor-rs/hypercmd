@@ -90,7 +90,9 @@ cd my-app
 hypercmd run
 ```
 
-`hypercmd new` writes the counter above and checks that it builds. Edit `ui/app.html` for the screen and `src/main.rs` for its state, then `hypercmd run` again. Run `hypercmd --help` for the other commands.
+`hypercmd new` writes the counter above and checks that it builds. Edit
+`ui/app.html` for the screen and `src/main.rs` for its state, then `hypercmd run`
+again. See the [CLI reference](docs/cli.md) for commands and options.
 
 ### Author an application
 
@@ -140,9 +142,16 @@ To run the examples from a checkout, use [`just`](https://github.com/casey/just)
 
 ## Documentation
 
+The Markdown guides also power a site through
+[`docs-base`](https://github.com/fusor-rs/docs-base).
+The [landing page](apps/landing/README.md) and docs share a browser workspace.
+Run `just site`, then `just preview` to serve both on port 4187.
+See [the site guide](apps/docs/README.md).
+
 | Guide | Covers |
 | --- | --- |
-| [Terminal profile](docs/profile.md) | Supported HTML, CSS, layout, scrolling and Unicode policy |
+| [CLI reference](docs/cli.md) | Installation, creating apps, checks, running and building |
+| [HTML and CSS reference](docs/profile.md) | Supported HTML, CSS, layout, scrolling and Unicode policy |
 | [Controls](docs/controls.md) | Keyboard, focus, buttons, text and checkbox bindings |
 | [Async views](docs/async.md) | `Async`/`Await`, coherent publication and cancellation |
 | [Routing](docs/routing.md) | Screens, nested views and in-memory history |

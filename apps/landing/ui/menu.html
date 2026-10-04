@@ -1,0 +1,18 @@
+<template rust:component="Menu">
+  <main class="demo">
+    <h1>What would you like to do?</h1>
+    <p>Pick a command.</p>
+
+    <div class="menu">
+      <ForEach items="{{ COMMANDS.to_vec() }}"
+        key="{{ |command| *command }}">
+        <button class:chosen="state.selected.get() == item.get()"
+          on:click="state.selected.set(item.get())">
+          {{ item.get().label() }}
+        </button>
+      </ForEach>
+    </div>
+
+    <p>Selected: {{ state.selected.get().label() }}</p>
+  </main>
+</template>

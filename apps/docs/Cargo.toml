@@ -1,0 +1,29 @@
+[package]
+name = "hypercmd-docs"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.85"
+publish = false
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+docs-base = { git = "https://github.com/fusor-rs/docs-base", rev = "e2c7b3939721002ea2aa7556d8e4409aa131472b" }
+fusor = { package = "fusor-core", version = "=0.1.4", features = ["dom", "derive"] }
+fusor-components = { version = "=0.1.4", features = ["browser"] }
+fusor-router = { version = "=0.1.4", features = ["browser"] }
+wasm-bindgen = "=0.2.117"
+
+[build-dependencies]
+docs-base-build = { git = "https://github.com/fusor-rs/docs-base", rev = "e2c7b3939721002ea2aa7556d8e4409aa131472b" }
+fusor-build = "=0.1.4"
+
+[package.metadata.fusor]
+entry = "web/index.html"
+assets = "public"
+base-path = "/docs/"
+history-fallback = ["/"]
+
+[lints.rust]
+unsafe_code = "forbid"
