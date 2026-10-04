@@ -162,6 +162,8 @@ try {
     + 'Run hypercmd upgrade';
   const checks = ['--offline', '--frozen'].map(mode =>
     ['check', mode, '--manifest-path', join(root, 'crates/hypercmd-cli/Cargo.toml')]);
+  // Compile before entering the PTY helper's short exit deadline.
+  await run(installed, checks[0]);
   for (const args of [['--help'], ['--version'], ...checks]) {
     assert.equal((await run(terminal, [installed, ...args])).stdout.includes(warning), false);
   }
