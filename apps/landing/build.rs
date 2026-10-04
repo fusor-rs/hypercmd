@@ -37,6 +37,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         println!("cargo:rerun-if-changed={source}");
         write_asset(&destination, &fs::read(source)?)?;
     }
+    println!("cargo:rerun-if-changed=../../install.sh");
+    write_asset("public/install.sh", &fs::read("../../install.sh")?)?;
     highlighted_examples()?;
     project_files()?;
     hypercmd_build::compile_app()?;
@@ -48,21 +50,29 @@ fn highlighted_examples() -> Result<(), Box<dyn std::error::Error>> {
     let mut examples = Vec::new();
     for (name, label, hint, rows) in EXAMPLES {
         let kind = format_ident!("{name}");
-        let filename = format!("{}.html", name.to_lowercase());
-        let source = fs::read_to_string(format!("ui/{filename}"))?;
-        let mut lines = Vec::new();
-        for (index, line) in source.lines().enumerate() {
-            let number = index + 1;
-            let tokens = highlighter.tokens(line, "html")?;
-            lines.push(quote! { CodeLine { number: #number, tokens: #tokens } });
+        let mut files = Vec::new();
+        for (directory, extension, language) in
+            [("ui", "html", "HTML"), ("src/examples", "rs", "Rust")]
+        {
+            let filename = format!("{}.{extension}", name.to_lowercase());
+            let source = fs::read_to_string(format!("{directory}/{filename}"))?;
+            let mut lines = Vec::new();
+            for (index, line) in source.lines().enumerate() {
+                let number = index + 1;
+                let tokens = highlighter.tokens(line, language)?;
+                lines.push(quote! { CodeLine { number: #number, tokens: #tokens } });
+            }
+            files.push(quote! {
+                SourceFile { filename: #filename, language: #language, lines: &[#(#lines),*] }
+            });
+            write_asset(&format!("public/{filename}"), source.as_bytes())?;
         }
         examples.push(quote! {
             Example {
-                kind: ExampleKind::#kind, filename: #filename, label: #label,
-                hint: #hint, rows: #rows, lines: &[#(#lines),*],
+                kind: ExampleKind::#kind, label: #label, hint: #hint,
+                rows: #rows, files: [#(#files),*],
             }
         });
-        write_asset(&format!("public/{filename}"), source.as_bytes())?;
     }
     fs::write(
         PathBuf::from(env::var("OUT_DIR")?).join("source.rs"),

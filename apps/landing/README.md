@@ -9,7 +9,9 @@ repository root, run `just site` to build the landing page and docs into
 The five templates in `ui/` are both the editor's displayed source and the input
 compiled by Hypercmd. Counter is selected initially; the example buttons switch
 between counter, filesystem search, tables, boxes and menu demonstrations.
-Switching examples starts a fresh component. The preview paints its terminal cells
+Each example has HTML and Rust file buttons that show its actual `ui/` template
+and `src/examples/` module. Switching files keeps the terminal state; switching
+examples starts a fresh component. The preview paints its terminal cells
 and exposes the generated button and text-input handlers as accessible
 browser controls, without native terminal dependencies.
 
@@ -30,6 +32,10 @@ to the sibling documentation app at `/docs/` and its CLI reference at `/docs/cli
 The quick start shows how to create and run an app after installing the CLI.
 The combined site mounts both applications; see the root
 [deployment guide](../../CONTRIBUTING.md#deploying-the-site) for Vercel hosting.
+
+The build copies the repository's `install.sh` into `public/`, so the site serves
+`/install.sh` as a static file. Edit the root script; the public copy is generated
+and ignored by Git. `just site-browser` checks that the response matches it exactly.
 
 `just landing-check` checks formatting, Clippy and Rust 1.85. `just landing-browser`
 builds the app and exercises entrance and switching animations, all five terminal

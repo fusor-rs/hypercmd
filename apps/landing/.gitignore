@@ -2,3 +2,5 @@
 /dist/
 /public/brand/
 /public/*.html
+/public/*.rs
+/public/install.sh

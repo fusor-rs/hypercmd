@@ -20,13 +20,19 @@ struct CodeLine {
 }
 
 #[derive(PartialEq)]
+struct SourceFile {
+    filename: &'static str,
+    language: &'static str,
+    lines: &'static [CodeLine],
+}
+
+#[derive(PartialEq)]
 struct Example {
     kind: ExampleKind,
-    filename: &'static str,
     label: &'static str,
     hint: &'static str,
     rows: u16,
-    lines: &'static [CodeLine],
+    files: [SourceFile; 2],
 }
 
 include!(concat!(env!("OUT_DIR"), "/source.rs"));
@@ -61,6 +67,7 @@ impl App {
 
 struct Showcase {
     example: &'static Example,
+    source: Signal<&'static SourceFile>,
     terminal: Rc<Terminal>,
 }
 
@@ -75,6 +82,7 @@ impl FromInputs for Showcase {
     fn from_inputs(inputs: Self::Inputs, _owner: fusor::OwnerHandle) -> Result<Self, Self::Error> {
         Ok(Self {
             example: inputs.example,
+            source: signal(&inputs.example.files[0]),
             terminal: Rc::new(
                 Terminal::new(inputs.example.kind, inputs.example.rows)
                     .map_err(|error| JsValue::from_str(&error.to_string()))?,

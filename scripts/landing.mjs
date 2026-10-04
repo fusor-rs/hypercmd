@@ -84,11 +84,9 @@ await checkBrowser("apps/landing", async (page, origin) => {
   await page.emulateMedia({ reducedMotion: "reduce" });
   for (const [label, filename] of examples) {
     const terminal = await select(page, label);
-    const source = await readFile(resolve(app, "ui", filename), "utf8");
-    assert.equal(await (await page.request.get(origin + filename)).text(), source);
-    assert.equal((await page.locator(".code-line").allTextContents()).join("\n"), source.trimEnd());
     assert.equal(await terminal.evaluate(node => getComputedStyle(node).animationName), "none");
     await interactions[label](page, terminal);
+    await checkSourceFiles(page, origin, filename, terminal);
     assert((await terminal.locator(".terminal-output").innerText()).trimEnd().endsWith("╯"));
     await page.screenshot({
       path: resolve(app, `target/landing-${label.toLowerCase()}.png`), fullPage: true,
@@ -97,12 +95,16 @@ await checkBrowser("apps/landing", async (page, origin) => {
   await checkInstallation(page);
   for (const width of [390, 320, 768]) {
     await page.setViewportSize({ width, height: 844 });
-    for (const [label] of examples) {
+    for (const [label, filename] of examples) {
       await select(page, label);
-      assert(
-        await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth),
-        `${label}: ${width}px overflow`,
-      );
+      for (const name of [filename, filename.replace(".html", ".rs")]) {
+        await page.getByRole("group", { name: "Source files" })
+          .getByRole("button", { name, exact: true }).click();
+        assert(
+          await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth),
+          `${name}: ${width}px overflow`,
+        );
+      }
     }
     const terminal = await select(page, "Counter");
     await interactions.Counter(page, terminal);
@@ -119,6 +121,28 @@ async function select(page, label) {
   const terminal = page.getByRole("group", { name: `Interactive terminal: ${label}`, exact: true });
   await terminal.waitFor();
   return terminal;
+}
+
+async function checkSourceFiles(page, origin, filename, terminal) {
+  const picker = page.getByRole("group", { name: "Source files" });
+  const rust = filename.replace(".html", ".rs");
+  assert.deepEqual(await picker.getByRole("button").allTextContents(), [filename, rust]);
+  assert.equal(await picker.getByRole("button", { name: filename, exact: true })
+    .getAttribute("aria-pressed"), "true");
+  const preview = await terminal.elementHandle();
+  const output = await terminal.innerText();
+  for (const [name, directory, language] of [[rust, "src/examples", "Rust"], [filename, "ui", "HTML"]]) {
+    const button = picker.getByRole("button", { name, exact: true });
+    await button.focus();
+    await button.press("Enter");
+    assert.equal(await button.getAttribute("aria-pressed"), "true");
+    const source = await readFile(resolve(app, directory, name), "utf8");
+    assert.equal(await (await page.request.get(origin + name)).text(), source);
+    assert.equal((await page.locator(".code-line").allTextContents()).join("\n"), source.trimEnd());
+    assert((await page.locator(".source").getAttribute("aria-label")).includes(language));
+    assert(await preview.evaluate(node => node.isConnected), "file changes retain the terminal");
+    assert.equal(await terminal.innerText(), output, "file changes preserve the example state");
+  }
 }
 
 async function checkTransitions(page) {
@@ -148,6 +172,7 @@ async function checkTransitions(page) {
 }
 
 async function checkInstallation(page) {
+  await page.getByRole("heading", { name: "HTML for the interface. Rust for the logic." }).waitFor();
   await page.context().grantPermissions(["clipboard-read", "clipboard-write"]);
   await page.getByRole("button", { name: "Copy command", exact: true }).click();
   await page.getByRole("button", { name: "Copied!", exact: true }).waitFor();

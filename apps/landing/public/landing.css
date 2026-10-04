@@ -171,7 +171,7 @@ h1 span {
 .window-controls {
   display: flex;
   gap: 6px;
-  margin-right: 14px;
+  flex-shrink: 0;
 }
 .window-controls i {
   width: 8px;
@@ -185,14 +185,31 @@ h1 span {
 .window-controls i:nth-child(3) {
   background: #495d50;
 }
-.filename {
+.file-tabs {
   display: flex;
-  align-items: center;
-  gap: 8px;
+  align-self: stretch;
+  gap: 4px;
+  min-width: 0;
 }
-.html-icon {
+.file-tab {
+  padding: 0 12px;
+  border: 0;
+  border-bottom: 2px solid transparent;
+  background: transparent;
+  color: #91998e;
+  font: inherit;
+  white-space: nowrap;
+}
+.file-tab:hover {
+  color: #d8d8d0;
+}
+.file-tab[aria-pressed="true"] {
+  border-bottom-color: #e09b77;
+  background: #ffffff05;
   color: #e09b77;
-  font-size: 14px;
+}
+.file-tab:focus-visible {
+  outline-offset: -4px;
 }
 .pane-label {
   margin-left: auto;
@@ -205,9 +222,8 @@ h1 span {
 }
 .source {
   padding: 27px 23px 27px 0;
-  flex: 1;
-  min-height: 454px;
-  overflow-x: auto;
+  height: 454px;
+  overflow: auto;
   font: 12px/20px var(--mono);
   white-space: normal;
 }
@@ -524,12 +540,16 @@ footer p {
     font-size: 11px;
   }
   .source {
-    min-height: 0;
+    height: 340px;
     padding: 19px 14px 21px 0;
     font-size: 11px;
   }
   .line-number {
     width: 36px;
+  }
+  .file-tab {
+    padding-inline: 8px;
+    font-size: 11px;
   }
   .editor .pane-footer {
     display: none;

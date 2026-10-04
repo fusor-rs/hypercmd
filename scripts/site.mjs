@@ -3,6 +3,12 @@ import { readFile } from "node:fs/promises";
 import { checkBrowser } from "./browser-app.mjs";
 
 await checkBrowser("apps", async (page, origin) => {
+  const installer = await page.request.get(origin + "install.sh");
+  assert.equal(installer.status(), 200);
+  assert.deepEqual(
+    await installer.body(),
+    await readFile(new URL("../install.sh", import.meta.url)),
+  );
   await page.goto(origin);
   await page.getByRole("heading", { name: "Write CLI applications using plain HTML" }).waitFor();
   assert.equal(
