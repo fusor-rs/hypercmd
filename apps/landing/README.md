@@ -29,7 +29,8 @@ live in `build.rs`.
 Brand assets come from `assets/brand/`. The build copies those assets and each
 example's downloadable source into `public/`; edit the originals. The page links
 to the sibling documentation app at `/docs/` and its CLI reference at `/docs/cli`.
-The quick start shows how to create and run an app after installing the CLI.
+The installation box offers Cargo and Linux commands; its copy button uses the
+selected command. The quick start shows how to create and run an app afterward.
 The combined site mounts both applications; see the root
 [deployment guide](../../CONTRIBUTING.md#deploying-the-site) for Vercel hosting.
 

@@ -95,6 +95,7 @@ await checkBrowser("apps/landing", async (page, origin) => {
   await checkInstallation(page);
   for (const width of [390, 320, 768]) {
     await page.setViewportSize({ width, height: 844 });
+    await checkInstallMethods(page);
     for (const [label, filename] of examples) {
       await select(page, label);
       for (const name of [filename, filename.replace(".html", ".rs")]) {
@@ -174,11 +175,11 @@ async function checkTransitions(page) {
 async function checkInstallation(page) {
   await page.getByRole("heading", { name: "HTML for the interface. Rust for the logic." }).waitFor();
   await page.context().grantPermissions(["clipboard-read", "clipboard-write"]);
-  await page.getByRole("button", { name: "Copy command", exact: true }).click();
-  await page.getByRole("button", { name: "Copied!", exact: true }).waitFor();
-  assert.equal(
-    await page.evaluate(() => navigator.clipboard.readText()), "cargo install hypercmd-cli --locked",
-  );
+  const methods = page.getByRole("group", { name: "Installation method" });
+  assert.deepEqual(await methods.getByRole("button").allTextContents(), ["Cargo", "Linux"]);
+  assert.equal(await methods.getByRole("button", { name: "Cargo", exact: true })
+    .getAttribute("aria-pressed"), "true");
+  await checkInstallMethods(page);
   assert.equal(
     await page.getByRole("link", { name: "Documentation" }).getAttribute("href"), "/docs/",
   );
@@ -189,4 +190,22 @@ async function checkInstallation(page) {
   assert.equal(
     await page.getByRole("link", { name: /@fusor_rs/ }).getAttribute("href"), "https://x.com/fusor_rs",
   );
+}
+
+async function checkInstallMethods(page) {
+  const methods = page.getByRole("group", { name: "Installation method" });
+  for (const [name, command] of [
+    ["Cargo", "cargo install hypercmd-cli --locked"],
+    ["Linux", "curl -fsSL https://cmd.fusor.build/install.sh | sh"],
+  ]) {
+    const button = methods.getByRole("button", { name, exact: true });
+    await button.focus();
+    await button.press("Enter");
+    assert.equal(await methods.locator('[aria-pressed="true"]').innerText(), name);
+    assert.equal(await page.locator(".install-command code").innerText(), command);
+    await page.getByRole("button", { name: "Copy command", exact: true }).click();
+    await page.getByRole("button", { name: "Copied!", exact: true }).waitFor();
+    assert.equal(await page.evaluate(() => navigator.clipboard.readText()), command);
+    assert(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth));
+  }
 }

@@ -55,14 +55,24 @@
           </section>
           <section class="installation" aria-labelledby="install-title">
             <h2 id="install-title">HTML for the interface. Rust for the logic.</h2>
-            <div class="install-command">
-              <span class="shell-prompt" aria-hidden="true">$</span>
-              <code>{{ INSTALL }}</code>
-              <button class="copy-button" class:copied="state.copy_label.get() == COPY_SUCCESS"
-                on:click="state.copy_install()" aria-label="{{ state.copy_label.get() }}">
-                <img src="/copy.svg" width="17" height="17" alt="" />
-                <span aria-live="polite">{{ state.copy_label.get() }}</span>
-              </button>
+            <div class="install-box">
+              <div class="install-methods" role="group" aria-label="Installation method">
+                <ForEach items="{{ INSTALL_METHODS.iter().collect::<Vec<_>>() }}"
+                  key="{{ |method| method.name }}">
+                  <button aria-controls="install-command"
+                    aria-pressed="{{ state.install_method.get() == item.get() }}"
+                    on:click="state.select_install(item.get())">{{ item.get().name }}</button>
+                </ForEach>
+              </div>
+              <div id="install-command" class="install-command">
+                <span class="shell-prompt" aria-hidden="true">$</span>
+                <code>{{ state.install_method.get().command }}</code>
+                <button class="copy-button" class:copied="state.copy_label.get() == COPY_SUCCESS"
+                  on:click="state.copy_install()" aria-label="{{ state.copy_label.get() }}">
+                  <img src="/copy.svg" width="17" height="17" alt="" />
+                  <span aria-live="polite">{{ state.copy_label.get() }}</span>
+                </button>
+              </div>
             </div>
             <p class="install-note">
               macOS &amp; Linux <span aria-hidden="true">·</span>

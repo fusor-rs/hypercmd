@@ -353,23 +353,47 @@ h2 {
   letter-spacing: -0.025em;
   margin-bottom: 17px;
 }
+.install-box {
+  width: min(660px, 100%);
+  margin: 0 auto;
+  border: 1px solid #ddd9d0;
+  border-radius: 6px;
+  background: #f2f0eb;
+}
+.install-methods {
+  display: flex;
+  gap: 24px;
+  padding: 0 18px;
+  border-bottom: 1px solid #ddd9d0;
+}
+.install-methods button {
+  padding: 12px 0;
+  border: 0;
+  border-bottom: 2px solid transparent;
+  background: transparent;
+  color: var(--muted);
+  font: 12px var(--mono);
+}
+.install-methods button:hover {
+  color: var(--oxide);
+}
+.install-methods button[aria-pressed="true"] {
+  color: var(--oxide);
+  border-bottom-color: var(--oxide);
+}
 .install-command {
   display: flex;
   align-items: center;
   gap: 8px;
-  width: fit-content;
-  max-width: 100%;
-  margin: 0 auto;
   padding: 16px 18px;
-  border: 1px solid #ddd9d0;
-  border-radius: 6px;
-  background: #f2f0eb;
 }
 .install-command > .shell-prompt {
   margin: 0 8px 0 0;
   font: 14px var(--mono);
 }
 .install-command code {
+  min-width: 0;
+  overflow-wrap: anywhere;
   font: 12px var(--mono);
   user-select: all;
   text-align: left;
@@ -381,7 +405,7 @@ h2 {
   gap: 7px;
   align-items: center;
   padding: 0 0 0 19px;
-  margin-left: 19px;
+  margin-left: auto;
   border: 0;
   border-left: 1px solid #dcd8cf;
   background: transparent;

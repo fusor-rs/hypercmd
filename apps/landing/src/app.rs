@@ -3,7 +3,23 @@ use fusor::{FromInputs, Signal, signal};
 use std::rc::Rc;
 use wasm_bindgen::JsValue;
 
-const INSTALL: &str = "cargo install hypercmd-cli --locked";
+#[derive(PartialEq)]
+struct InstallMethod {
+    name: &'static str,
+    command: &'static str,
+}
+
+const INSTALL_METHODS: &[InstallMethod] = &[
+    InstallMethod {
+        name: "Cargo",
+        command: "cargo install hypercmd-cli --locked",
+    },
+    InstallMethod {
+        name: "Linux",
+        command: "curl -fsSL https://cmd.fusor.build/install.sh | sh",
+    },
+];
+const COPY_PROMPT: &str = "Copy command";
 const COPY_SUCCESS: &str = "Copied!";
 
 #[derive(Clone, Copy, PartialEq)]
@@ -39,6 +55,7 @@ include!(concat!(env!("OUT_DIR"), "/source.rs"));
 
 struct App {
     example: Signal<&'static Example>,
+    install_method: Signal<&'static InstallMethod>,
     clipboard: web_sys::Clipboard,
     copy_label: Signal<&'static str>,
 }
@@ -48,19 +65,30 @@ impl App {
         let window = web_sys::window().ok_or_else(|| JsValue::from_str("window is unavailable"))?;
         Ok(Self {
             example: signal(&EXAMPLES[0]),
+            install_method: signal(&INSTALL_METHODS[0]),
             clipboard: window.navigator().clipboard(),
-            copy_label: signal("Copy command"),
+            copy_label: signal(COPY_PROMPT),
         })
     }
 
+    fn select_install(&self, method: &'static InstallMethod) {
+        self.install_method.set(method);
+        self.copy_label.set(COPY_PROMPT);
+    }
+
     fn copy_install(&self) {
-        let promise = self.clipboard.write_text(INSTALL);
+        let method = self.install_method.get();
+        let promise = self.clipboard.write_text(method.command);
+        let selected = self.install_method.clone();
         let label = self.copy_label.clone();
         wasm_bindgen_futures::spawn_local(async move {
-            label.set(match wasm_bindgen_futures::JsFuture::from(promise).await {
+            let outcome = match wasm_bindgen_futures::JsFuture::from(promise).await {
                 Ok(_) => COPY_SUCCESS,
                 Err(_) => "Select command to copy",
-            });
+            };
+            if selected.get() == method {
+                label.set(outcome);
+            }
         });
     }
 }
@@ -96,7 +124,7 @@ impl FromInputs for Showcase {
     reason = "generated DOM scaffolding: https://github.com/fusor-rs/fusor/issues/17"
 )]
 mod dom {
-    use super::{App, COPY_SUCCESS, EXAMPLES, INSTALL, Showcase};
+    use super::{App, COPY_SUCCESS, EXAMPLES, INSTALL_METHODS, Showcase};
     use crate::terminal::COLUMNS;
     fusor::template!("web/index.html");
 }
