@@ -22,6 +22,11 @@ clap = { version = "=4.5.53", features = ["derive"] }
 serde.workspace = true
 serde_json.workspace = true
 toml.workspace = true
+semver = { version = "=1.0.28", features = ["serde"] }
+tempfile.workspace = true
+
+[dev-dependencies]
+portable-pty.workspace = true
 
 [lints]
 workspace = true

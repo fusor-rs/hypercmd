@@ -129,8 +129,8 @@ fn load_maps(out_dir: &Path, maps: &mut Maps) {
     if !manifest.exists() {
         return;
     }
-    let result = OutputManifest::read(&manifest).and_then(|manifest| {
-        manifest
+    let result = (|| {
+        OutputManifest::read(&manifest)?
             .sources
             .into_iter()
             .map(|source| {
@@ -143,7 +143,7 @@ fn load_maps(out_dir: &Path, maps: &mut Maps) {
                 ))
             })
             .collect::<Result<Vec<_>>>()
-    });
+    })();
     match result {
         Ok(entries) => maps.extend(entries),
         Err(error) => eprintln!(

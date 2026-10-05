@@ -7,7 +7,7 @@ use std::{
 use toml::{Table, Value};
 
 /// The fusor release this hypercmd is built against; a test keeps it in sync.
-pub(crate) const FUSOR_VERSION: &str = "0.1.4";
+pub(crate) const FUSOR_VERSION: &str = "0.1.5";
 
 const BUILD_RS: &str = "fn main() -> Result<(), Box<dyn std::error::Error>> {
     hypercmd_build::compile_app()

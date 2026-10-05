@@ -11,8 +11,10 @@ repository="fusor-rs/hypercmd"
 # Overridable so the release workflow can test this script against the archives
 # it has just built, before they are published.
 download_base="${HYPERCMD_DOWNLOAD_BASE:-https://github.com/$repository/releases/download}"
-install_dir="${HYPERCMD_INSTALL:-$HOME/.hypercmd}"
 version="${1:-${HYPERCMD_VERSION:-}}"
+if [ "$version" = "--archive" ]; then
+  version="$2"
+fi
 
 fail() {
   echo "error: $*" >&2
@@ -46,8 +48,16 @@ case "$version" in
 esac
 
 archive="hypercmd-${version#v}-$target.tar.gz"
+if [ "${1:-}" = "--archive" ]; then
+  echo "$archive"
+  exit 0
+fi
+
 url="$download_base/$version/$archive"
-temporary=$(mktemp -d)
+executable="${HYPERCMD_BIN:-${HYPERCMD_INSTALL:-$HOME/.hypercmd}/bin/hypercmd}"
+bin_dir=$(dirname "$executable")
+mkdir -p "$bin_dir"
+temporary=$(mktemp -d "$bin_dir/.hypercmd-XXXXXX")
 trap 'rm -rf "$temporary"' EXIT
 
 echo "Downloading hypercmd $version for $target"
@@ -64,19 +74,29 @@ else
 fi
 [ "$expected" = "$actual" ] || fail "checksum mismatch for $archive; the download is corrupt or was tampered with"
 
-tar -xzf "$temporary/$archive" -C "$temporary"
-mkdir -p "$install_dir/bin"
-mv "$temporary/hypercmd-${version#v}-$target/hypercmd" "$install_dir/bin/hypercmd"
-chmod +x "$install_dir/bin/hypercmd"
+member="${archive%.tar.gz}/hypercmd"
+tar -xzf "$temporary/$archive" -C "$temporary" "$member"
+replacement="$temporary/$member"
+[ -f "$replacement" ] && [ ! -L "$replacement" ] ||
+  fail "archive has no regular hypercmd executable"
+chmod +x "$replacement"
+installed_version=$("$replacement" --version) || fail "downloaded hypercmd could not run"
+[ "$installed_version" = "hypercmd ${version#v}" ] ||
+  fail "downloaded hypercmd has the wrong version"
+mv -f "$replacement" "$executable"
 
-echo "Installed $("$install_dir/bin/hypercmd" --version) to $install_dir/bin"
+echo "Installed $installed_version to $bin_dir"
+
+if [ -n "${HYPERCMD_BIN:-}" ]; then
+  exit 0
+fi
 
 case ":$PATH:" in
-  *":$install_dir/bin:"*) ;;
+  *":$bin_dir:"*) ;;
   *)
     echo
     echo "Add hypercmd to your PATH, for example in ~/.zshrc or ~/.bashrc:"
-    echo "  export PATH=\"$install_dir/bin:\$PATH\""
+    echo "  export PATH=\"$bin_dir:\$PATH\""
     ;;
 esac
 

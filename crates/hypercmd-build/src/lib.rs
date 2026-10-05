@@ -82,8 +82,8 @@ pub fn compile_app() -> Result<()> {
         path.path().hash(&mut hash);
         backend.file.set(hash.finish());
         generate(html, &backend)
-    })
-    .map(|_| ())
+    })?;
+    Ok(())
 }
 
 fn styles(root: &Path, config: &Config) -> Result<proc_macro2::TokenStream> {

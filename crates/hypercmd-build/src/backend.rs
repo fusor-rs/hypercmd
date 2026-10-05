@@ -52,7 +52,7 @@ impl Backend for HypercmdBackend {
         }
     }
     fn version(&self) -> u32 {
-        2
+        3
     }
     fn name(&self) -> &str {
         "hypercmd terminal-v1"

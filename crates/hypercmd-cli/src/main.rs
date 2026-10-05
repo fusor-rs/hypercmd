@@ -1,6 +1,7 @@
 //! The hypercmd command-line tool: create, check, run and build terminal apps.
 mod cargo;
 mod new;
+mod upgrade;
 
 use clap::{Parser, Subcommand};
 use std::{ffi::OsString, fs, path::PathBuf, process::ExitCode};
@@ -48,10 +49,18 @@ enum Action {
     },
     /// List the supported HTML elements and CSS properties
     Profile,
+    /// Upgrade the installed CLI to the latest stable release
+    Upgrade,
 }
 
 fn main() -> ExitCode {
-    match run(Cli::parse().command) {
+    let action = Cli::parse().command;
+    let offline = matches!(&action, Action::Check { args }
+        if args.iter().any(|argument| argument == "--offline" || argument == "--frozen"));
+    if !offline && !matches!(action, Action::Upgrade) {
+        upgrade::notify();
+    }
+    match run(action) {
         Ok(()) => ExitCode::SUCCESS,
         Err(error) => {
             eprintln!("hypercmd: {error}");
@@ -62,6 +71,7 @@ fn main() -> ExitCode {
 
 fn run(action: Action) -> Result {
     match action {
+        Action::Upgrade => upgrade::run(),
         Action::New {
             path,
             hypercmd_path,

@@ -11,13 +11,13 @@ crate-type = ["cdylib", "rlib"]
 
 [dependencies]
 hypercmd-job-controls = { path = "../../examples/job-controls", features = ["terminal", "browser"] }
-fusor = { package = "fusor-core", version = "=0.1.4", default-features = false, features = ["dom"] }
-fusor-components = { version = "=0.1.4", default-features = false, features = ["browser"] }
+fusor = { package = "fusor-core", version = "=0.1.5", default-features = false, features = ["dom"] }
+fusor-components = { version = "=0.1.5", default-features = false, features = ["browser"] }
 wasm-bindgen = "=0.2.117"
 web-sys = { version = "=0.3.94", features = ["Window", "Document", "Element", "HtmlHeadElement"] }
 
 [build-dependencies]
-fusor-build = { version = "=0.1.4" }
+fusor-build = { version = "=0.1.5" }
 
 [package.metadata.fusor]
 entry = "web/index.html"

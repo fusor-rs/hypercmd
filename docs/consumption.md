@@ -29,7 +29,7 @@ terminal styles are compiled into the library's generated component.
 
 ## Cargo archives
 
-Hypercmd gets fusor from crates.io, pinned to an exact version (`=0.1.4`; the `=` tells
+Hypercmd gets fusor from crates.io, pinned to an exact version (`=0.1.5`; the `=` tells
 Cargo to accept only that version).
 
 `just packages` creates Cargo `.crate` archives, the source packages Cargo publishes, for

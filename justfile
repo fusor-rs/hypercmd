@@ -6,6 +6,7 @@ check: lint consumer cli packages msrv landing-check docs-check
 # A new app from the CLI must check cleanly against this checkout.
 cli:
     cargo run -p hypercmd-cli --locked -- new "$(mktemp -d)/starter" --hypercmd-path .
+    node scripts/upgrade.mjs
 
 lint:
     cargo fmt --all -- --check
@@ -93,7 +94,7 @@ setup-browser:
     rustup target add wasm32-unknown-unknown
     rustup target add --toolchain 1.85 wasm32-unknown-unknown
     cargo install wasm-bindgen-cli --version 0.2.117 --locked
-    cargo install fusor-cli --version 0.1.4 --locked
+    cargo install fusor-cli --version 0.1.5 --locked
     npm ci
     npx playwright install chromium
 

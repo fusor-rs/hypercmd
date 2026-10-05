@@ -35,7 +35,7 @@ impl App {
     clippy::too_many_lines,
     clippy::excessive_nesting,
     clippy::redundant_clone,
-    reason = "fusor-build 0.1.4's DOM codegen leaves these unsuppressed in generated mount code"
+    reason = "fusor-build 0.1.5's DOM codegen leaves these unsuppressed in generated mount code"
 )]
 mod dom {
     use super::App;

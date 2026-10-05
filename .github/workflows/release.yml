@@ -127,3 +127,15 @@ jobs:
           else
             cargo publish --workspace --locked "${skip[@]}"
           fi
+
+  ready:
+    if: github.event_name == 'release'
+    needs: [attach, crates-io]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - run: gh release upload "$GITHUB_REF_NAME" install.sh --clobber --repo "$GITHUB_REPOSITORY"
+        env:
+          GH_TOKEN: ${{ github.token }}

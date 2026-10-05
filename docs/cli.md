@@ -97,6 +97,37 @@ Prints the supported HTML elements and CSS properties with accepted values. It d
 build an application. The [HTML and CSS reference](profile.md) explains layout behavior and
 unsupported features.
 
+## hypercmd upgrade
+
+```sh
+hypercmd upgrade
+```
+
+Upgrades the installed CLI to the latest stable release. An equal or older release
+leaves the installation unchanged. Cargo installations upgrade through Cargo in their
+existing installation root. Other installations download the matching macOS or Linux
+archive, verify its SHA-256 checksum and version, and replace the running executable.
+The replacement is staged in the same directory so a failed download or verification
+leaves the installed CLI intact. Symlinks continue to point to the upgraded executable.
+
+The command uses the same `curl`, `tar` and checksum tools as `install.sh`. Its
+installation directory must be writable. Upgrading the CLI does not change existing
+projects' dependency versions.
+
+Interactive commands print a warning when a newer release is available:
+
+```text
+⚠️ New version available: 0.1.2 → 0.1.3. Run hypercmd upgrade
+```
+
+Release checks run at most once per 24 hours with a two-second network timeout.
+Results are cached under `$XDG_CACHE_HOME/hypercmd`, or `~/.cache/hypercmd` when that
+variable is unset. Failed checks preserve the last known release and do not fail the
+command. Automatic checks are skipped in CI, when stdout or stderr is redirected,
+for help and version output, and for `check --offline` or `check --frozen`.
+`upgrade` always checks for a release directly. A release is offered after its
+platform archive, checksum and final installer asset are present.
+
 ## Help and version
 
 ```sh
